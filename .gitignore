@@ -1,0 +1,71 @@
+
+
+# Ignore all large CSVs and data traces, but keep the directories
+datasets/**/*.csv
+datasets/**/*.dat
+datasets/**/*.gz
+datasets/**/*.json
+datasets/**/*.parquet
+*.log
+
+# Python (ML Refinery, Preprocessing, Stats Eval)
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+# Virtual environments
+venv/
+env/
+.venv/
+.env-python/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Node.js & JavaScript (Server, k6 Load Generator, Profiler)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+# Environment variables
+.env
+.env.local
+.env.*
+!.env.example
+
+# Zig (SAMM Runtime Core Sidecar)
+zig-cache/
+zig-out/
+.zig-cache/
+build/
+Release/
+Debug/
+*.o
+*.obj
+*.so
+*.dll
+*.dylib
+*.node
+
+# LaTeX / Manuscript (Thesis Documentation)
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.lot
+*.out
+*.toc
+*.synctex.gz
+*.xdv
+
+# OS & IDE (WSL, VS Code)
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
