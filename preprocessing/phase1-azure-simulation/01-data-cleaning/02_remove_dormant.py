@@ -1,3 +1,9 @@
+# DATASET USED: invocations_per_function
+# The invocations_per_function dataset tells the load generator when to attack and how fast to send requests. 
+
+# This file removes all dormant functions
+# If there's a day that a function has not burst at least once, it will be dropped.
+# A function that bursted in day 1, and not on the other days, is still eligible and will be included
 import pandas as pd
 import glob
 import os

@@ -1,3 +1,6 @@
+# DATASET USED: invocations_per_function
+# The invocations_per_function dataset tells the load generator when to attack and how fast to send requests. 
+
 # This file filters the invocations_per_function cvs into http only triggers
 # Triggers that is not http means that it is created by the machine such as orchestrator, queue, timer, etc.
 # We only use the triggers from an actual network traffic
