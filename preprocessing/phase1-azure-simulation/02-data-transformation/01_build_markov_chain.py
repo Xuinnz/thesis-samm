@@ -12,7 +12,7 @@ import os
 import time
 
 INPUT_DIR="../../../datasets/azure-trace-2019/intermediate/step3-zero-fixed"
-OUTPUT_DIR="../../../datasets/azure-trace-2019/intermediate/traffic-models"
+OUTPUT_DIR="../../../datasets/azure-trace-2019/processed/traffic-models"
 
 def build_markov_chain():
     os.makedirs(OUTPUT_DIR, exist_ok=True)

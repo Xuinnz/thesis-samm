@@ -9,7 +9,7 @@ import time
 import json
 
 INPUT_DIR = "../../../datasets/azure-trace-2019/raw"
-OUTPUT_DIR = "../../../datasets/azure-trace-2019/intermediate/traffic-models"
+OUTPUT_DIR = "../../../datasets/azure-trace-2019/processed/traffic-models"
 
 # ---------------------------------------------------------------------------
 # Log-normal fitting via least-squares across 4 percentile anchors
