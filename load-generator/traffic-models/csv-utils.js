@@ -52,8 +52,8 @@ function rowsToObjects(headers, rows){
         const num = Number(raw);
         obj[header] = Number.isNaN(num) ? raw : num;
       }
-
     });
+    return obj;
   });
 }
 
