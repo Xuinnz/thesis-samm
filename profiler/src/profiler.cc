@@ -158,7 +158,7 @@ namespace {
     bool exists = check.good() && check.peek() != std::ifstream::traits_type::eof();
     check.close();
 
-    if (!exist){
+    if (!exists){
       std::ofstream out(path, std::ios::out | std::ios::trunc);
       out << "call_site_hash, allocation_size_bytes, allocation_time_ms, finalization_time_ms\n";
     }
@@ -243,7 +243,7 @@ namespace {
 	QueuedRecord queued;
 	queued.call_site_hash = rec.call_site_hash; // call site
 	queued.size_bytes = rec.size_bytes; // payload size
-	queued.alloc_times_ms = rec.alloc_time_ms // payload lifespan start
+	queued.alloc_time_ms = rec.alloc_time_ms; // payload lifespan start
 
 	queued.finalize_time_ms = NowMs(); // payload lifespan death
 
