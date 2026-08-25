@@ -21,14 +21,13 @@
 const path = require('path');
 
 const ENABLED = process.env.SHADOW_PROFILER_ENABLED === 'true';
-const FLUSH_INTERVAL_MS = Number(process.env.SHADOW_PROFILER_FLUSH_MS) || 5000;
 const OUTPUT_PATH =
   process.env.SHADOW_PROFILER_OUTPUT ||
   path.join(__dirname, '..', 'datasets', 'shadow-telemetry', 'raw', 'training_trace.csv');
 
 let native = null;
-let flushTimer = null;
 let shutdownRegistered = false;
+let statsTimer = null;
 
 if (ENABLED) {
   // eslint-disable-next-line global-require
@@ -50,57 +49,71 @@ function track(obj, callSiteId, sizeBytes) {
   native.track(obj, callSiteId, sizeBytes);
 }
 
-function flush() {
-  if (!native) return { written: 0 };
-  return native.flush(OUTPUT_PATH);
-}
-
-function flushFinal() {
-  if (!native) return { written: 0, censored: 0 };
-  return native.flushFinal(OUTPUT_PATH);
-}
-
 function getStats() {
-  if (!native) return { capacity: 0, allocated: 0, finalized: 0, pending: 0 };
+  if (!native) return { capacity: 0, inUse: 0, free: 0, totalTracked: 0, totalWritten: 0, totalCensored: 0 };
   return native.getStats();
 }
 
+/**
+ * Starts the background writer thread. Call once at server startup,
+ * before traffic begins, so finalizers firing early in the run have
+ * somewhere to write to.
+ */
 function start() {
-  if (!native || flushTimer) return;
+  if (!native) return;
 
-  flushTimer = setInterval(() => {
-    const result = flush();
-    if (result.written > 0) {
-      console.log(`[shadow-profiler] flushed ${result.written} finalized records`);
-    }
-  }, FLUSH_INTERVAL_MS);
-  flushTimer.unref(); // does not keep the process alive on its own
+  const started = native.start(OUTPUT_PATH);
+  if (!started) {
+    console.log('[shadow-profiler] writer thread already running, skipping start()');
+    return;
+  }
+
+  console.log(`[shadow-profiler] writer thread started. output=${OUTPUT_PATH}`);
+
+  // Periodic stats logging (not writing — the background thread owns
+  // all writes now). Purely informational, safe to skip if unwanted.
+  statsTimer = setInterval(() => {
+    const stats = getStats();
+    console.log(
+      `[shadow-profiler] inUse=${stats.inUse}/${stats.capacity} ` +
+      `tracked=${stats.totalTracked} written=${stats.totalWritten} censored=${stats.totalCensored}`
+    );
+  }, Number(process.env.SHADOW_PROFILER_STATS_INTERVAL_MS) || 10000);
+  statsTimer.unref();
 
   if (!shutdownRegistered) {
     shutdownRegistered = true;
     const finalizeAndExit = (signal) => {
-      console.log(`[shadow-profiler] ${signal} received, performing final flush...`);
-      if (flushTimer) clearInterval(flushTimer);
-      const result = flushFinal();
+      console.log(`[shadow-profiler] ${signal} received, stopping writer thread...`);
+      if (statsTimer) clearInterval(statsTimer);
+      const result = native.stop();
       console.log(
-        `[shadow-profiler] final flush complete: ${result.written} finalized, ` +
-          `${result.censored} right-censored records written to ${OUTPUT_PATH}`
+        `[shadow-profiler] stopped: ${result.written} finalized, ` +
+        `${result.censored} right-censored records written to ${OUTPUT_PATH}`
       );
     };
     process.on('SIGTERM', () => finalizeAndExit('SIGTERM'));
     process.on('SIGINT', () => finalizeAndExit('SIGINT'));
     process.on('exit', () => finalizeAndExit('exit'));
   }
+}
 
-  console.log(`[shadow-profiler] started. output=${OUTPUT_PATH} flush_interval=${FLUSH_INTERVAL_MS}ms`);
+/**
+ * Explicit stop, for callers that want the final counts synchronously
+ * (e.g. a characterization driver script) rather than relying on the
+ * process-exit hook.
+ */
+function stop() {
+  if (!native) return { written: 0, censored: 0 };
+  if (statsTimer) clearInterval(statsTimer);
+  return native.stop();
 }
 
 module.exports = {
   enabled: ENABLED,
   track,
-  flush,
-  flushFinal,
-  getStats,
   start,
+  stop,
+  getStats,
   OUTPUT_PATH,
 };
