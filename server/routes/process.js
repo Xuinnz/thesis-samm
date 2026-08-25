@@ -10,7 +10,7 @@ function processRoute(req, res){
     //payload size is extracted from the payload 
     const bytes = resolvePayloadBytes(req, 5);
 
-    const buffer = allocateBuffer(bytes);
+    const buffer = allocateBuffer(bytes, 'process.js:processRoute');
 
     // the higher the payload, the longer the process.
     // what makes this endpoint have a high variance and lifespan.

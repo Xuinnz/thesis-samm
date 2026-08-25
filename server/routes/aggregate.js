@@ -13,7 +13,7 @@ const MAX_RETAINED_ENTRIES = 500;
 
 function aggregateRoute(req, res) {
     const bytes = resolvePayloadBytes(req, 1);
-    const buffer = allocateBuffer(bytes);
+    const buffer = allocateBuffer(bytes, 'aggregate.js:aggregateRoute');
 
     // push the buffer to the global heap
     persistentStore.push({

@@ -13,7 +13,7 @@ const CACHE_ENTRY_BYTES = 1024 * 4;
 
 function cacheRoute(req, res) {
     // allocate 4kb
-    const buffer = allocateBuffer(CACHE_ENTRY_BYTES);
+    const buffer = allocateBuffer(CACHE_ENTRY_BYTES, 'cache.js:cacheRoute');
 
     // simulate process to wire up the physical ram
     const checksum = simulateProcessing(buffer);

@@ -26,7 +26,7 @@ function randomDelayMs() {
 async function fetchRoute(req, res) {
     const bytes = FETCH_BASE_BYTES + randomJitterBytes();
 
-    const buffer = allocateBuffer(bytes);
+    const buffer = allocateBuffer(bytes, 'fetch.js:fetchRoute');
 
     // this is async, v8 event loop will pause this function till after timeout
     // v8 gc cannot collect this due to still being used.
@@ -37,7 +37,7 @@ async function fetchRoute(req, res) {
     res.status(200).json({
         route: 'fetch',
         bytes,
-        checksum,
+        checkSum,
     });
 }
 

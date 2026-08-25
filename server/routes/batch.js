@@ -30,7 +30,7 @@ function batchRoute(req, res) {
     for (let i = 0; i < safeCount; i += 1){
         const bytes = randomItemBytes();
 
-        const buffer = allocateBuffer(bytes);
+        const buffer = allocateBuffer(bytes, 'batch.js:batchRoute');
         checksumAllumulator = (checksumAllumulator + simulateProcessing(buffer));
 
         totalBytes += bytes;

@@ -1,5 +1,7 @@
 'use strict';
 
+const profiler = require('../../profiler')
+
 // post functions does not actually contain real bytes. 
 // it only contains "size_mb: 45", a hard coded one.
 // this function parses it and translates it into raw bytes for V8
@@ -12,8 +14,17 @@ function resolvePayloadBytes(req, defaultMb = 1){
 
 // we are using allocUnsafe for faster allocations.
 // allocSafe automatically fills the buffer with 0 to delete the bytes but it takes time.
-function allocateBuffer(bytes) {
-  return Buffer.allocUnsafe(Math.max(bytes, 1));
+
+// when callsiteid is provided and shadow profiler is enabled, the returned buffer is registered
+// for lifespan tracking under that callsiteid
+function allocateBuffer(bytes, callSiteId) {
+  const buffer = Buffer.allocUnsafe(Math.max(bytes, 1));
+
+  if (callSiteId){
+    profiler.track(buffer, callSiteId, buffer.length);
+  }
+  
+  return buffer;
 }
 
 // we simulate a process to trigger a page fault
