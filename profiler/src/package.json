@@ -1,0 +1,17 @@
+{
+  "name": "shadow-profiler",
+  "version": "1.0.0",
+  "description": "Native N-API sidecar for per-object allocation lifespan telemetry (SAMM thesis, Phase 4)",
+  "main": "index.js",
+  "gypfile": true,
+  "scripts": {
+    "build": "node-gyp rebuild",
+    "clean": "node-gyp clean"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.0.0"
+  },
+  "devDependencies": {
+    "node-gyp": "^10.1.0"
+  }
+}
