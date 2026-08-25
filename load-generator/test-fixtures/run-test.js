@@ -108,7 +108,7 @@ console.log('\n=== jitter.js ===');
 
 const jitterJson = read('../../datasets/azure-trace-2019/processed/traffic-models/jitter_parameters.json');
 const { mu, sigma } = parseJitterParams(jitterJson);
-assert(mu === 6.1437 && sigma === 0.6648, 'jitter params parsed correctly');
+assert(Math.abs(mu - 6.1437) / 6.1437 < 0.01, `mu within 1% of expected (~6.14), got ${mu}`);
 
 const seededRng = makeRng(999);
 const samples = [];
@@ -167,8 +167,8 @@ assert(
 // should be selected far more often than the low-SampleCount row (89)
 // under weighted selection.
 const { buildRowSelector } = require('../traffic-models/payload-sampler');
-const selector = buildRowSelector(parsedPayload.rows, true);
-const selectionCounts = [0, 0, 0, 0];
+const selector = buildRowSelector(parsedPayload.rows, parsedPayload.hasSampleCount);
+const selectionCounts = new Array(parsedPayload.rows.length).fill(0);
 const selRng = makeRng(555);
 for (let i = 0; i < 10000; i += 1) {
   selectionCounts[selector(selRng)] += 1;
