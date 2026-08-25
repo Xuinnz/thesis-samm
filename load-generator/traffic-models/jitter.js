@@ -39,7 +39,7 @@ function sampleThinkTimeMs(mu, sigma, rng){
   const u2 = rand();
 
   // box-muller transformation to convert uniform randoms into a Standard Normal (Z-score)
-  const z = Math.sqrt(-2 * Math.log(1)) * Math.cos(2 * Math.PI * u2);
+  const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
 
   // convert the Z-score back into our Log-Normal millisecond duration
   return Math.exp(mu + sigma * z);

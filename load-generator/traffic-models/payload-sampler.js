@@ -1,11 +1,14 @@
 'use strict';
 
+/**
+ * This file controls how much memory is allocated using memory_payload_allocations.csv from data preprocessing
+ * It picks a percentile bucket, then pick a random number in between using linear interpolation.
+ * This ensures that we can send request of highly varied, uneven sizes
+ */
+
+
 const { parseCsv, rowsToObjects } = require('./csv-utils');
 
-// Standard percentile -> cumulative probability mapping. Only used to
-// interpret column *names* like "payload_..._pct95_mb" as points on
-// an empirical CDF — no payload values themselves are hardcoded here,
-// everything numeric comes from the CSV.
 const PERCENTILE_COLUMN_RE = /^payload_.*_pct(\d+)_mb$/;
 
 /**
@@ -136,6 +139,10 @@ function buildPayloadSampler(parsed) {
     const randomFn = rng || Math.random;
     const rowIdx = selectRowIndex(randomFn);
     const row = rows[rowIdx];
+
+    if (!row) {
+      console.log('CRASH DEBUG -> rowIdx:', rowIdx, 'rows.length:', rows.length, 'typeof rows:', typeof rows, 'Array.isArray(rows):', Array.isArray(rows));
+    }
 
     // Pick a bucket boundary pair (anchors[i-1], anchors[i]) by
     // cumulative probability mass.
