@@ -9,7 +9,7 @@ const { resolvePayloadBytes, allocateBuffer } = require('./_alloc-utils');
 const persistentStore = [];
 
 // max so it does not consume all ram
-const MAX_RETAINED_ENTRIES = 500;
+const MAX_RETAINED_ENTRIES = 50;
 
 function aggregateRoute(req, res) {
     const bytes = resolvePayloadBytes(req, 1);
