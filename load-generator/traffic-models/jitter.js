@@ -4,8 +4,6 @@
 
 'use strict';
 
-const { parse } = require("node:path");
-
 /*
   Parses jitter_parameters.json and validates that the mathematical parameters are present and valid
 */

@@ -13,7 +13,7 @@
 
 'use strict';
 
-const { parseCsv } = require('./csv-utils');
+const { parseCsv } = require('./csv-utils.js');
 
 const STATE_ORDER = ['Idle', 'Ramp', 'Burst', 'Cooldown'];
 

@@ -7,7 +7,7 @@
  */
 
 
-const { parseCsv, rowsToObjects } = require('./csv-utils');
+const { parseCsv, rowsToObjects } = require('./csv-utils.js');
 
 const PERCENTILE_COLUMN_RE = /^payload_.*_pct(\d+)_mb$/;
 
