@@ -160,7 +160,7 @@ namespace {
 
     if (!exists){
       std::ofstream out(path, std::ios::out | std::ios::trunc);
-      out << "call_site_hash, allocation_size_bytes, allocation_time_ms, finalization_time_ms\n";
+      out << "call_site_hash,allocation_size_bytes,allocation_time_ms,finalization_time_ms\n";
     }
   }
 
