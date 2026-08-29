@@ -1,0 +1,56 @@
+# docker/baseline-environment/docker-compose.yml
+#
+# Run from the repo root:
+#   docker compose -f docker/baseline-environment/docker-compose.yml up characterization
+#   docker compose -f docker/baseline-environment/docker-compose.yml up benchmark
+#
+# Both services build from the SAME Dockerfile/image — only the
+# environment variables and (for characterization) the volume mount
+# differ. This is the single-image-two-modes design described at the
+# top of the Dockerfile.
+
+services:
+  # ---------------------------------------------------------------
+  # Characterization pass: profiler ON, produces training_trace.csv
+  # on the HOST via the volume mount (the container is ephemeral,
+  # the CSV must survive after it exits).
+  # ---------------------------------------------------------------
+  characterization:
+    build:
+      context: ../..
+      dockerfile: docker/baseline-environment/Dockerfile
+    image: samm-baseline:latest
+    container_name: samm-characterization
+    ports:
+      - "3000:3000"
+    environment:
+      SHADOW_PROFILER_ENABLED: "true"
+      SHADOW_PROFILER_CAPACITY: "5000"       # tune based on observed inUse/capacity from stats logging
+      SHADOW_PROFILER_STATS_INTERVAL_MS: "10000"
+    volumes:
+      - ../../datasets/shadow-telemetry/raw:/app/datasets/shadow-telemetry/raw
+    mem_limit: 1024M
+    memswap_limit: 1024M   # equal to mem_limit => zero swap headroom (true swap-off,
+                            # stronger guarantee than mem_swappiness alone)
+    mem_swappiness: 0
+    cpus: 1.0
+
+  # ---------------------------------------------------------------
+  # Final benchmark condition: profiler OFF. Run this 100 times per
+  # the methodology (n=100 independent test cycles for the baseline
+  # condition). No volume needed — nothing is written to disk.
+  # ---------------------------------------------------------------
+  benchmark:
+    build:
+      context: ../..
+      dockerfile: docker/baseline-environment/Dockerfile
+    image: samm-baseline:latest
+    container_name: samm-baseline-benchmark
+    ports:
+      - "3000:3000"
+    environment:
+      SHADOW_PROFILER_ENABLED: "false"
+    mem_limit: 1024M
+    memswap_limit: 1024M
+    mem_swappiness: 0
+    cpus: 1.0

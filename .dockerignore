@@ -1,0 +1,12 @@
+# Placed at repo root (build context). Keeps the image lean and
+# avoids accidentally baking host-machine node_modules/build output
+# (which may not match the container's architecture) into the image.
+
+**/node_modules
+**/build
+datasets/
+load-generator/
+docker/
+.git
+.gitignore
+*.md
