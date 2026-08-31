@@ -45,6 +45,7 @@
 
 import http from 'k6/http';
 import { sleep } from 'k6';
+import { SharedArray } from 'k6/data'; // <-- The memory savior
 
 const {
   parseTransitionMatrix,
@@ -127,8 +128,38 @@ const stages = buildK6Stages(schedule, STAGE_MERGE_TOLERANCE_RPS);
 
 const { mu, sigma } = parseJitterParams(open(JITTER_PARAMS_PATH));
 
-const parsedPayload = parsePayloadCsv(open(PAYLOAD_CSV_PATH));
-const samplePayloadMb = buildPayloadSampler(parsedPayload);
+
+// Put BOTH the open() call and the heavy parsing strictly inside the SharedArray.
+// k6 guarantees this callback fires exactly once. The raw 80MB string is born, 
+// parsed, and destroyed entirely within this scope. VUs never see it.
+const sharedRows = new SharedArray('azure rows', function () {
+  const rawCsv = open(PAYLOAD_CSV_PATH);
+  return parsePayloadCsv(rawCsv).rows;
+});
+
+// 2. Derive the metadata dynamically from the keys of the very first shared row!
+// This implements your exact idea: no raw string needed in the global scope.
+const sampleRow = sharedRows[0];
+const headers = Object.keys(sampleRow);
+
+const percentileColumns = [];
+for (const header of headers) {
+  const match = header.match(/^payload_.*_pct(\d+)_mb$/);
+  if (match) {
+    percentileColumns.push({ column: header, pct: Number(match[1]) });
+  }
+}
+percentileColumns.sort((a, b) => a.pct - b.pct);
+const hasSampleCount = headers.includes('SampleCount');
+
+// 3. Reconstruct the object for the sampler engine
+const samplePayloadMb = buildPayloadSampler({
+  rows: sharedRows,
+  percentileColumns: percentileColumns,
+  hasSampleCount: hasSampleCount
+});
+
+// =====================================================================
 
 // Cumulative endpoint weight table, built once.
 const endpointNames = Object.keys(ENDPOINT_WEIGHTS);
