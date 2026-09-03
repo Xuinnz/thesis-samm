@@ -253,6 +253,7 @@ export default function samLoadIteration() {
   const handler = ENDPOINT_HANDLERS[endpoint];
   handler();
 
-  const thinkMs = sampleThinkTimeMs(mu, sigma);
-  sleep(thinkMs / 1000); // k6 sleep() takes seconds
+  // const thinkMs = sampleThinkTimeMs(mu, sigma);
+  // sleep(thinkMs / 1000); // k6 sleep() takes seconds
+  // removed client side jitter
 }
