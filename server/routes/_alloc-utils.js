@@ -27,15 +27,28 @@ function allocateBuffer(bytes, callSiteId) {
   return buffer;
 }
 
-// we simulate a process to trigger a page fault
-// this will make sure that the heap we requested will actually get the physical ram we requested
-// not just the virtual ram
-function simulateProcessing(buffer){
-  let checksum = 0
+//
+const FIXED_TOUCH_COUNT = 32;
 
-  //stride of 4096 to trigger a page fault every 4kb
-  const stride = 4096;
-  for (let i = 0; i < buffer.length; i += stride){
+/**
+ * we simulate a process to make sure that the cpu actually reserves the memory
+ * This has a fixed 32 steps, meaning a 32MB and 4KB payload will cost the same cpu
+ * This is to make sure that we remove the cpu pressure while still maintaining the memory pressure
+ * 
+ * NOTE: In prev runs, this has fixed increment of 4096 (to trigger page fault), but it only cause cpu pressure
+ * it was 99% CPU while still having 200MB memory. which means the bottle neck was the CPU and not the memory
+ * I fixed it by adding a FIXED_TOUCH_COUNT, making sure that every process simulated will cost the same CPU cycle
+ * and actually pressure the memory without dragging cpu.
+ */
+function simulateProcessing(buffer){
+  const len = buffer.length;
+  if (len === 0) return 0;
+
+  let checksum = 0;
+
+  const step = Math.max(1, Math.floor(len / FIXED_TOUCH_COUNT));
+
+  for (let i = 0; i < len; i += step){
     //bitwise and keeps the checksum from overflowing into a bigInt
     checksum = (checksum + buffer[i]) & 0xff;
   }
