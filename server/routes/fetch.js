@@ -6,7 +6,6 @@
 'use strict';
 
 const { allocateBuffer, simulateProcessing } = require('./_alloc-utils');
-const { sampleHoldMs } = require('./_duration-sampler');
 
 //Base size of 64KB with +/- 8KB jitter
 const FETCH_BASE_BYTES = 64 * 1024;
@@ -20,7 +19,7 @@ async function fetchRoute(req, res) {
     const bytes = FETCH_BASE_BYTES + randomJitterBytes();
 
     const buffer = allocateBuffer(bytes, 'fetch.js:fetchRoute');
-    const holdMs = sampleHoldMs();
+    const holdMs = Number(req.body && req.body.hold_ms) || 10;
 
     await new Promise((resolve) => setTimeout(resolve, holdMs));
 

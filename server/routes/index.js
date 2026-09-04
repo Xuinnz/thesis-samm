@@ -12,7 +12,7 @@ function registerRoutes(app){
 
     app.post('/api/cache', cacheRoute);
 
-    app.get('/api/fetch', fetchRoute);
+    app.post('/api/fetch', fetchRoute);
 
     app.post('/api/process', processRoute);
 

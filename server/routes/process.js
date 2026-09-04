@@ -5,7 +5,6 @@
 'use strict';
 
 const { resolvePayloadBytes, allocateBuffer, simulateProcessing} = require('./_alloc-utils');
-const { sampleHoldMs } = require('./_duration-sampler.js')
 /**
  * k6 payload sampler draws size_mb from the Azure-derived distribution
  * normalized in Script 3.1 to a ceiling of EFFECTIVE_CEILING_MB (824 MB after reserving room for V8)
@@ -36,7 +35,7 @@ async function processRoute(req, res) {
 
     // Held alive across async boundary for a data-driven duration
     // this is what drives the call-sites observed lifespan and variance.
-    const holdMs = sampleHoldMs();
+    const holdMs = Number(req.body && req.body.hold_ms) || 10;
     await new Promise((resolve) => setTimeout(resolve, holdMs));
 
     // to actually get the physical ram, we need to directly touch it.
