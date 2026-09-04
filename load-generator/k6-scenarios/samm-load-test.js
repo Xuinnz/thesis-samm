@@ -56,7 +56,7 @@ const {
   makeRng,
 } = require('../traffic-models/markov-chain.js');
 
-const { parseJitterParams, sampleThinkTimeMs } = require('../traffic-models/jitter.js');
+const { parseJitterParams, sampleHoldMs } = require('../traffic-models/jitter.js');
 
 const { parsePayloadCsv, buildPayloadSampler } = require('../traffic-models/payload-sampler.js');
 
@@ -210,12 +210,17 @@ function doCache() {
 }
 
 function doFetch() {
-  return http.get(`${BASE_URL}/api/fetch`);
+  const holdMs = sampleHoldMs(mu, sigma); 
+  const payload = JSON.stringify({ hold_ms: holdMs });
+  return http.post(`${BASE_URL}/api/fetch`, payload, {
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 function doProcess() {
   const sizeMb = samplePayloadMb();
-  const payload = JSON.stringify({ size_mb: sizeMb });
+  const holdMs = sampleHoldMs(mu, sigma);
+  const payload = JSON.stringify({ size_mb: sizeMb, hold_ms: holdMs });
   return http.post(`${BASE_URL}/api/process`, payload, {
     headers: { 'Content-Type': 'application/json' },
   });

@@ -28,7 +28,7 @@ function parseJitterParams(jsonText){
  * @param {number} sigma - The standard deviation
  * @param {Functiom} [rng] - random number generator (defaults to math.random)
  */
-function sampleThinkTimeMs(mu, sigma, rng){
+function sampleHoldMs(mu, sigma, rng){
   const rand = rng || Math.random;
   let u1 = rand();
 
@@ -45,5 +45,5 @@ function sampleThinkTimeMs(mu, sigma, rng){
 
 module.exports = {
   parseJitterParams,
-  sampleThinkTimeMs
+  sampleHoldMs
 };
