@@ -18,7 +18,7 @@ const {
   STATE_ORDER,
 } = require('../traffic-models/markov-chain');
 
-const { parseJitterParams, sampleThinkTimeMs } = require('../traffic-models/jitter');
+const { parseJitterParams, sampleHoldMs } = require('../traffic-models/jitter');
 
 const {
   parsePayloadCsv,
@@ -113,7 +113,7 @@ assert(Math.abs(mu - 6.1437) / 6.1437 < 0.01, `mu within 1% of expected (~6.14),
 const seededRng = makeRng(999);
 const samples = [];
 for (let i = 0; i < 20000; i += 1) {
-  samples.push(sampleThinkTimeMs(mu, sigma, seededRng));
+  samples.push(sampleHoldMs(mu, sigma, seededRng));
 }
 samples.sort((a, b) => a - b);
 const median = samples[Math.floor(samples.length / 2)];
