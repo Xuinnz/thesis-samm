@@ -12,9 +12,7 @@ import os
 import time
 import json
 
-# The architecture is specified around three temporal strata
-# (Short/Medium/Long), so K never drops below this regardless of what the
-# elbow heuristic returns on a handful of call-sites.
+# Minimum clusters of 3 for (Short, Medium, Long)
 MIN_TEMPORAL_STRATA = 3
 
 INPUT_PATH = "../../datasets/shadow-telemetry/intermediate/step6-log-transformation/call_site_features_log_transformed.csv"
@@ -106,9 +104,7 @@ def discover_strata():
     # drop dominates by construction, so it reliably returns K=2, and K=2 merges
     # the Medium-lived call-sites into the same cluster as the genuinely
     # persistent ones. Everything in the top cluster is then classified System,
-    # which removes it from the allocator AND inflates the System reservation:
-    # measured at 500 RPS, that left 40MB of a 1GB container for managed arenas
-    # and the table compiler refused to build.
+    # which removes it from the allocator AND inflates the System reservation
     elbow_k = best_k
     min_k = min(MIN_TEMPORAL_STRATA, len(df))
     if best_k < min_k:
