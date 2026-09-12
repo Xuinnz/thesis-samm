@@ -12,6 +12,11 @@ import os
 import time
 import json
 
+# The architecture is specified around three temporal strata
+# (Short/Medium/Long), so K never drops below this regardless of what the
+# elbow heuristic returns on a handful of call-sites.
+MIN_TEMPORAL_STRATA = 3
+
 INPUT_PATH = "../../datasets/shadow-telemetry/intermediate/step6-log-transformation/call_site_features_log_transformed.csv"
 OUTPUT_DIR = "../../datasets/shadow-telemetry/intermediate/ml-refinery"
 
@@ -93,6 +98,43 @@ def discover_strata():
             print(f"  K={k}: WCSS''={d2:.4f}{marker}")
     print(f"\nOptimal K (argmax WCSS''): K = {best_k}")
 
+    # Floor the elbow's answer at the number of strata the architecture is
+    # defined around: Short / Medium / Long.
+    #
+    # The elbow is still computed and still reported -- it chooses K whenever it
+    # asks for 3 or more. But with one data point per call-site the 1->2 WCSS
+    # drop dominates by construction, so it reliably returns K=2, and K=2 merges
+    # the Medium-lived call-sites into the same cluster as the genuinely
+    # persistent ones. Everything in the top cluster is then classified System,
+    # which removes it from the allocator AND inflates the System reservation:
+    # measured at 500 RPS, that left 40MB of a 1GB container for managed arenas
+    # and the table compiler refused to build.
+    elbow_k = best_k
+    min_k = min(MIN_TEMPORAL_STRATA, len(df))
+    if best_k < min_k:
+        print(f"Raising K from {best_k} to the {min_k}-stratum minimum "
+              f"(Short/Medium/Long); the elbow is advisory below that.")
+        best_k = min_k
+
+    # Manual override. The elbow heuristic is computed over very few points (one
+    # per call-site), where the 1->2 drop always dominates and K=2 wins almost by
+    # construction. K=2 collapses Medium-lived call-sites into the same stratum
+    # as the genuinely persistent ones, and everything in the highest cluster is
+    # then classified System -- which removes it from the allocator entirely and
+    # inflates the System reservation until no pool is left. Set SAMM_KMEANS_K to
+    # pin the number of temporal strata (the architecture describes three:
+    # Short/Medium/Long).
+    forced_k = os.environ.get("SAMM_KMEANS_K")
+    if forced_k:
+        requested = int(forced_k)
+        if not 1 <= requested <= len(df):
+            raise SystemExit(
+                f"ERROR: SAMM_KMEANS_K={requested} is outside 1..{len(df)} "
+                f"(there are only {len(df)} call-sites to cluster).")
+        if requested != best_k:
+            print(f"OVERRIDE: SAMM_KMEANS_K={requested} (elbow had chosen K={best_k})")
+        best_k = requested
+
     # Retrain with the final model
     final_km = KMeans(n_clusters=best_k, init='k-means++', n_init=10, random_state=RANDOM_STATE)
 
@@ -124,6 +166,9 @@ def discover_strata():
             "wcss": inertias,
             "second_derivatives": second_derivatives,
             "selected_k": best_k,
+            "elbow_k": elbow_k,
+            "min_temporal_strata": MIN_TEMPORAL_STRATA,
+            "k_source": "SAMM_KMEANS_K override" if os.environ.get("SAMM_KMEANS_K") else "elbow",
         }, f, indent=4)  # indent=4 adds spacing to make it readable for humans
 
     elapsed = time.time() - start_time
