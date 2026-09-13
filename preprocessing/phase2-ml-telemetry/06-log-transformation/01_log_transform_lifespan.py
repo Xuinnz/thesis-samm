@@ -46,8 +46,38 @@ def log_transform_lifespan():
 
     df['mu_lifespan_log'] = np.log(df['mu_lifespan'] + 1)
 
+    # Same log(x+1) treatment for the scope-relative feature, which is what the
+    # clustering consumes when it is available. Ratios are heavily right-skewed
+    # -- a call-site that escapes its request sits orders of magnitude above one
+    # that does not -- and without the transform the centroids collapse onto the
+    # escaping site exactly as they do for raw lifespans.
+    if 'mu_scope_relative' in df.columns:
+        df['mu_scope_relative_log'] = np.log(df['mu_scope_relative'].fillna(0.0) + 1)
+
+    # OVERHANG is the clustering feature: how long an object outlived the
+    # request that created it.
+    #
+    # Neither alternative works. Absolute lifespan includes the legitimate
+    # in-request time, so fetch/process (which await ~500ms by design) look
+    # long-lived and cluster next to genuinely-retained objects -- that is what
+    # merged the strata at 500 RPS. And lifespan-over-request-duration inverts
+    # the ordering instead: cache requests finish in under a millisecond, so the
+    # ratio hits 278 purely from a tiny denominator.
+    #
+    # Overhang subtracts the in-request portion and leaves GC lag plus
+    # retention. GC lag is a property of the runtime and lands in a tight band
+    # shared by every call-site; retention is per-call-site and sits far above
+    # it. That gap is what K-means separates. Clamped at zero because an object
+    # collected before its request closed has no overhang.
+    if 'median_overhang_ms' in df.columns:
+        df['overhang_log'] = np.log(
+            df['median_overhang_ms'].fillna(0.0).clip(lower=0.0) + 1)
+
     print(f"\nBefore/after log transform (ms -> log-ms scale):")
     display_cols = ['call_site_hash', 'mu_lifespan', 'mu_lifespan_log', 'sigma2', 'n_objects']
+    for extra in ('median_overhang_ms', 'overhang_log', 'mu_scope_relative'):
+        if extra in df.columns:
+            display_cols.append(extra)
     print(df[display_cols].sort_values('mu_lifespan').to_string(index=False))
 
     # sigma2 and n_objects are carried through unchanged — they are
