@@ -1,6 +1,11 @@
 # Step 5.2: Aggregate Call sites
 # all endpoints have their own hashes. They will now be called callsites.
-# We calculate for the mean lifespan of each callsites
+# We calculate for the mean lifespan of each callsites.
+# also calculates the scope-relative mean (mu_scope_relative) and variance.
+
+# extracts structural telemetry (overhang_ms, died_in_request_rate) to prove 
+# the escape rate. Call-sites with insufficient samples are dropped to ensure ML stability.
+
 # Then we will calculate the variance, or how chaotic their lifespan is.
 # Output: Callsite Lifespan, Callsite Lifespan Variance
 import pandas as pd
@@ -58,6 +63,29 @@ def aggregate_call_sites():
     # MIN_OBJECTS_PER_CALL_SITE filter below regardless, but guard
     # explicitly so downstream steps never see a NaN sigma2.
     agg['sigma2'] = agg['sigma2'].fillna(0.0)
+
+    # Scope-relative features, carried through to the clustering step.
+    #
+    # mu_scope_relative is the load-invariant replacement for mu_lifespan as the
+    # clustering feature; escape_rate is the structural fact that decides
+    # whether a call-site can be reclaimed deterministically at the request
+    # boundary or must remain GC-driven.
+    if 'scope_relative_lifetime' in df.columns:
+        scope_agg = df.groupby('call_site_hash').agg(
+            mu_scope_relative=('scope_relative_lifetime', 'mean'),
+            sigma2_scope_relative=('scope_relative_lifetime', 'var'),
+            died_in_request_rate=('died_in_request', 'mean'),
+            median_overhang_ms=('overhang_ms', 'median'),
+            mean_overhang_ms=('overhang_ms', 'mean'),
+            max_overhang_ms=('overhang_ms', 'max'),
+        )
+        scope_agg['sigma2_scope_relative'] = scope_agg['sigma2_scope_relative'].fillna(0.0)
+        agg = agg.merge(scope_agg, on='call_site_hash', how='left')
+
+        print("\nScope-relative features:")
+        print(agg[['call_site_hash', 'mu_lifespan', 'mu_scope_relative',
+                   'died_in_request_rate', 'median_overhang_ms',
+                   'max_overhang_ms']].to_string(index=False))
 
     print(f"\nPer-call-site aggregates (before minimum-sample filtering):")
     print(agg.to_string(index=False))
