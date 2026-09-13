@@ -44,9 +44,30 @@ if (ENABLED) {
  *                             e.g. "process.js:allocateBuffer".
  * @param {number} sizeBytes  Allocation size in bytes at creation time.
  */
-function track(obj, callSiteId, sizeBytes) {
+function track(obj, callSiteId, sizeBytes, scopeId) {
   if (!native) return;
-  native.track(obj, callSiteId, sizeBytes);
+  native.track(obj, callSiteId, sizeBytes, scopeId || 0);
+}
+
+/**
+ * Opens a scope (one request) and returns its id, or 0 when the profiler is
+ * disabled.
+ *
+ * Scopes are what let the refinery tell an object that died inside its request
+ * from one that escaped it. Time-to-finalization alone cannot: it measures when
+ * V8 got around to collecting, which moves with load rather than with the
+ * object's role, and at 500 RPS that compression collapsed the temporal
+ * clustering into two strata.
+ */
+function beginScope() {
+  if (!native) return 0;
+  return native.beginScope();
+}
+
+/** Closes a scope, recording its end time against the id from beginScope(). */
+function endScope(scopeId) {
+  if (!native || !scopeId) return;
+  native.endScope(scopeId);
 }
 
 function getStats() {
@@ -112,6 +133,8 @@ function stop() {
 module.exports = {
   enabled: ENABLED,
   track,
+  beginScope,
+  endScope,
   start,
   stop,
   getStats,

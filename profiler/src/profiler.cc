@@ -21,6 +21,10 @@
   Thread-safety note: track() and the finalizer callback are both guaranteed by N-API to execute on the main JS thread, and never
   concurrently with each other. This means the pool, the free-list  and the in-use table need NO lcking. Only the hand-off queue between
   the main thread and the writer thread needs synchronization.
+
+  additional (v3): v3 (Scope Tracking): Added request-boundary tracking to overcome GC non-determinism.
+  This introduces a `scope_id` to link every memory allocation to its specific HTTP request.
+  It outputs a second file, `scope_trace.csv`, containing the exact start and end times of every request.
 */
 
 /*
@@ -44,6 +48,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 
@@ -59,6 +64,15 @@ namespace {
     uint64_t call_site_hash = 0; // 64-bit integer instead of a string of the function that called this object
     uint64_t size_bytes = 0; // size of the object in bytes. passed in from JS
     double alloc_time_ms = 0.0; // start time of tracking
+    // Which request this object was allocated inside. 0 means "no scope".
+    //
+    // This is what lets the refinery distinguish an object that DIED inside its
+    // request from one that ESCAPED it. The lifespan we can otherwise measure is
+    // time-to-finalization, which is a property of GC scheduling rather than of
+    // the object: at 500 RPS every observed lifespan shrank (aggregate fell from
+    // 25.5s to 2.6s) purely because collection ran more often, which collapsed
+    // the temporal clustering. Scope membership does not move with load.
+    uint64_t scope_id = 0;
   };
 
   // we only need to store objects that are concurrenctly alive in v8
@@ -106,14 +120,30 @@ namespace {
   */
 
   // The data payload to be pushed into the queue, which then will be written to the file by the background thread
+  // The writer thread drains one queue but owns two output streams: allocation
+  // records and scope (request) records. `kind` says which stream a record
+  // belongs to, so a single hand-off queue still serves both.
+  enum class RecordKind : uint8_t { Allocation, Scope };
+
   struct QueuedRecord {
+    RecordKind kind = RecordKind::Allocation;
     uint64_t call_site_hash;
     uint64_t size_bytes; 
     double alloc_time_ms;
     double finalize_time_ms; //time that v8 destroyed the object
     bool censored; // if user stops the profiler while the object is still alive, we mark it as true. that means 
     // no data about when it died. 
+    uint64_t scope_id = 0;
+    // Scope records only: when the request opened and closed.
+    double scope_start_ms = 0.0;
+    double scope_end_ms = 0.0;
   };
+
+  // Open scopes, keyed by id. Bounded by concurrent requests (a few hundred),
+  // not by total requests, because an entry is erased the moment its scope
+  // ends. Touched only from the main JS thread, so it needs no lock.
+  std::unordered_map<uint64_t, double> g_scope_start;
+  uint64_t g_next_scope_id = 0;
 
   // Thread Synchronization Primitives 
   std::mutex g_queue_mutex; // mutex prevents the main thread and writer thread from reading/writing to the queue at the same time
@@ -153,23 +183,38 @@ namespace {
 
   // helper function to check if the file already exist
   // if it's a new file, we write the csv column headers
-  void WriteCsvHeaderIfNeeded(const std::string& path) {
+  void WriteCsvHeaderIfNeeded(const std::string& path, const char* header) {
     std::ifstream check(path);
     bool exists = check.good() && check.peek() != std::ifstream::traits_type::eof();
     check.close();
 
     if (!exists){
       std::ofstream out(path, std::ios::out | std::ios::trunc);
-      out << "call_site_hash,allocation_size_bytes,allocation_time_ms,finalization_time_ms\n";
+      out << header << "\n";
     }
+  }
+
+  // scope_trace.csv sits beside training_trace.csv. Kept as a separate stream
+  // rather than widening the allocation rows because a scope's end time is not
+  // known when its objects finalize -- an object can die long before or long
+  // after its request closes, and which of those happened is precisely the
+  // question the file exists to answer.
+  std::string ScopeTracePath(const std::string& trace_path) {
+    const size_t slash = trace_path.find_last_of("/\\");
+    const std::string dir = (slash == std::string::npos) ? "" : trace_path.substr(0, slash + 1);
+    return dir + "scope_trace.csv";
   }
 
   // background thread.
   void WriterThreadMain(std::string path){
-    WriteCsvHeaderIfNeeded(path);
+    const std::string scope_path = ScopeTracePath(path);
+    WriteCsvHeaderIfNeeded(path,
+        "call_site_hash,allocation_size_bytes,allocation_time_ms,finalization_time_ms,scope_id");
+    WriteCsvHeaderIfNeeded(scope_path, "scope_id,scope_start_ms,scope_end_ms");
 
     //append mode so we js keep addign to the bottom
     std::ofstream out(path, std::ios::out | std::ios::app);
+    std::ofstream scope_out(scope_path, std::ios::out | std::ios::app);
 
     // the private queue for storing the data from the actual queue to unlock it immediately
     std::vector<QueuedRecord> batch;
@@ -202,6 +247,12 @@ namespace {
 
       //we write the batch to disk
       for (const auto& rec : batch) {
+        if (rec.kind == RecordKind::Scope) {
+          scope_out << rec.scope_id << ',' << rec.scope_start_ms << ','
+                    << rec.scope_end_ms << '\n';
+          continue;
+        }
+
         out << rec.call_site_hash << ',' << rec.size_bytes << ',' << rec.alloc_time_ms << ',';
         if (rec.censored) {
           out << ""; 
@@ -210,11 +261,13 @@ namespace {
           out << rec.finalize_time_ms;
           g_total_written.fetch_add(1, std::memory_order_relaxed);
           }
-        out << '\n';
+        out << ',' << rec.scope_id << '\n';
         }
         out.flush();
+        scope_out.flush();
     }
     out.flush();
+    scope_out.flush();
   }
 
   /*
@@ -247,6 +300,8 @@ namespace {
 
 	queued.finalize_time_ms = NowMs(); // payload lifespan death
 
+	queued.scope_id = rec.scope_id; // which request this object belonged to
+
 	queued.censored = false; //since it wasnt killed by the server shutting down, it's false
 
 	EnqueueRecord(queued); //send to the shared queue
@@ -270,7 +325,7 @@ namespace {
 
       // Type Validation: Ensure JS passed exactly: (Object, String, Number)
       if (info.Length() < 3 || !info[0].IsObject() || !info[1].IsString() || !info[2].IsNumber()) {
-          Napi::TypeError::New(env, "track(object, callSiteId: string, sizeBytes: number) expected").ThrowAsJavaScriptException();
+          Napi::TypeError::New(env, "track(object, callSiteId: string, sizeBytes: number, scopeId?: number) expected").ThrowAsJavaScriptException();
           return env.Undefined();
       }
 
@@ -298,6 +353,11 @@ namespace {
       rec.call_site_hash = Fnv1aHash(call_site_id);
       rec.size_bytes = static_cast<uint64_t>(size_bytes < 0 ? 0 : size_bytes);
       rec.alloc_time_ms = NowMs();
+      // Optional 4th argument: the request this allocation belongs to. Absent
+      // (0) for allocations made outside any request.
+      rec.scope_id = (info.Length() >= 4 && info[3].IsNumber())
+          ? static_cast<uint64_t>(info[3].As<Napi::Number>().Int64Value())
+          : 0;
 
       g_total_tracked.fetch_add(1, std::memory_order_relaxed);
 
@@ -311,6 +371,36 @@ namespace {
       obj.AddFinalizer(OnObjectFinalized, idx_ptr);
 
       return Napi::Boolean::New(env, true);
+  }
+
+  // 1b. SCOPE TRACKING
+  // A scope is one request. beginScope() stamps its start, endScope() stamps
+  // its close and emits the pair, so post-processing can ask of every object
+  // whether it died inside its request or outlived it.
+  Napi::Value BeginScope(const Napi::CallbackInfo& info) {
+      Napi::Env env = info.Env();
+      const uint64_t id = ++g_next_scope_id;
+      g_scope_start[id] = NowMs();
+      return Napi::Number::New(env, static_cast<double>(id));
+  }
+
+  Napi::Value EndScope(const Napi::CallbackInfo& info) {
+      Napi::Env env = info.Env();
+      if (info.Length() < 1 || !info[0].IsNumber()) return env.Undefined();
+
+      const uint64_t id = static_cast<uint64_t>(info[0].As<Napi::Number>().Int64Value());
+      auto it = g_scope_start.find(id);
+      if (it == g_scope_start.end()) return env.Undefined(); // unknown or already closed
+
+      QueuedRecord queued;
+      queued.kind = RecordKind::Scope;
+      queued.scope_id = id;
+      queued.scope_start_ms = it->second;
+      queued.scope_end_ms = NowMs();
+      g_scope_start.erase(it);
+
+      EnqueueRecord(queued);
+      return env.Undefined();
   }
 
   // 2. THE "START" FUNCTION
@@ -348,6 +438,7 @@ namespace {
               queued.call_site_hash = rec.call_site_hash;
               queued.size_bytes = rec.size_bytes;
               queued.alloc_time_ms = rec.alloc_time_ms;
+              queued.scope_id = rec.scope_id;
               queued.finalize_time_ms = -1.0; 
               queued.censored = true; // Mark as "died because of shutdown, not GC"
               
@@ -421,6 +512,8 @@ namespace {
 
       // Map the C++ functions to JavaScript function names
       exports.Set("track", Napi::Function::New(env, Track));
+      exports.Set("beginScope", Napi::Function::New(env, BeginScope));
+      exports.Set("endScope", Napi::Function::New(env, EndScope));
       exports.Set("start", Napi::Function::New(env, Start));
       exports.Set("stop", Napi::Function::New(env, Stop));
       exports.Set("getStats", Napi::Function::New(env, GetStats));
