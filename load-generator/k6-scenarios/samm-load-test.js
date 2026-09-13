@@ -44,6 +44,7 @@
  */
 
 import http from 'k6/http';
+import { Trend } from 'k6/metrics';
 import { sleep } from 'k6';
 import { SharedArray } from 'k6/data'; // <-- The memory savior
 
@@ -203,35 +204,51 @@ export const options = {
 // Per-iteration request logic
 // ---------------------------------------------------------------------
 
+// 
+/**
+ * Since we have holdMs, that directly affects the latency, we use this processing time
+ * as a new metric. We subtract the http_req_duration by hold_ms. that way, we can get the
+ * actual processing time, without the holdMs making our data wrong. This measures the 
+ * actual latency of the allocator and not the holdMs anymore
+ */
+
+const processingTime = new Trend('processing_time', true);
+
+function recordProcessing(res, holdMs) {
+  processingTime.add(Math.max(0, res.timings.duration - (holdMs || 0)));
+  return res;
+}
+
+
 function doCache() {
-  return http.post(`${BASE_URL}/api/cache`, null, {
+  return recordProcessing(http.post(`${BASE_URL}/api/cache`, null, {
     headers: { 'Content-Type': 'application/json' },
-  });
+  }), 0);
 }
 
 function doFetch() {
   const holdMs = sampleHoldMs(mu, sigma); 
   const payload = JSON.stringify({ hold_ms: holdMs });
-  return http.post(`${BASE_URL}/api/fetch`, payload, {
+  return recordProcessing(http.post(`${BASE_URL}/api/fetch`, payload, {
     headers: { 'Content-Type': 'application/json' },
-  });
+  }), holdMs);
 }
 
 function doProcess() {
   const sizeMb = samplePayloadMb();
   const holdMs = sampleHoldMs(mu, sigma);
   const payload = JSON.stringify({ size_mb: sizeMb, hold_ms: holdMs });
-  return http.post(`${BASE_URL}/api/process`, payload, {
+  return recordProcessing(http.post(`${BASE_URL}/api/process`, payload, {
     headers: { 'Content-Type': 'application/json' },
-  });
+  }), holdMs);
 }
 
 function doAggregate() {
   const sizeMb = samplePayloadMb();
   const payload = JSON.stringify({ size_mb: sizeMb });
-  return http.post(`${BASE_URL}/api/aggregate`, payload, {
+  return recordProcessing(http.post(`${BASE_URL}/api/aggregate`, payload, {
     headers: { 'Content-Type': 'application/json' },
-  });
+  }), 0);
 }
 
 function doBatch() {
@@ -240,9 +257,9 @@ function doBatch() {
   // a fixed item count on every call.
   const itemCount = Math.max(10, Math.min(2000, Math.round(samplePayloadMb() * 2)));
   const payload = JSON.stringify({ item_count: itemCount });
-  return http.post(`${BASE_URL}/api/batch`, payload, {
+  return recordProcessing(http.post(`${BASE_URL}/api/batch`, payload, {
     headers: { 'Content-Type': 'application/json' },
-  });
+  }), 0);
 }
 
 const ENDPOINT_HANDLERS = {
