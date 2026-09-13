@@ -2,12 +2,11 @@
 # in each arena after reserving overhead for NodeJS V8 engine (System)
 
 # it does this by:
-# 1. Loading execution traces and allocation policies.
+# 1. Loading execution traces and allocation policies and measures Effective Release Time.
 # 2. Measuring peak memory usage (High-Water Mark) of each cluster and policy
 # 3. Reserving baseline, safety, and System overhead to find the leftover pool
-# 4. Measuring the peak concurrent memory demands of every bump and slab class
-# 5. Proportionally distributing the remaining pool among the arenas
-# 6. Exporting the calculated quotas to a JSON configuration file.
+# 4. Proportionally distributing the remaining pool among the arenas
+# 5. Exporting the calculated quotas to a JSON configuration file.
 
 # NOTE: Bump allocators have dedicated. So each call sites that are considered bump
 # will get their own arena
@@ -20,7 +19,10 @@ import pandas as pd
 import numpy as np
 
 
-TRACE_PATH = "../../datasets/shadow-telemetry/intermediate/step4-missing-value-handling/training_trace_censoring_removed.csv"
+# Step 5's output rather than step 4's: it carries the scope join, which is what
+# lets peak demand be computed from when SAMM actually releases memory instead of
+# when V8 happens to collect it.
+TRACE_PATH = "../../datasets/shadow-telemetry/intermediate/step5-feature-engineering/training_trace_with_lifespan.csv"
 POLICY_PATH = "../../datasets/shadow-telemetry/intermediate/ml-refinery/call_site_policy_assignment.csv"
 OUTPUT_DIR = "../../datasets/shadow-telemetry/intermediate/ml-refinery"
 
@@ -132,6 +134,46 @@ def calculate_quotas():
     # Merge on call_site_hash to tag each recorded allocation with its assigned strategy.
     df = trace.merge(policy, on='call_site_hash', how='inner')
 
+    # ------------------------------------------------------------------
+    # Effective release time for MANAGED strata.
+    #
+    # P_j drives the guaranteed floors, and computing it from
+    # finalization_time_ms measures "allocated but not yet collected" -- V8's
+    # garbage backlog, not simultaneously-live memory. That over-stated demand by
+    # roughly 12x in practice: floors summed to 763MB while SAMM's actual peak
+    # residency was 60MB, which consumed the entire pool on paper and left 17MB
+    # of elastic headroom.
+    #
+    # A region-reclaimed object is released when its REQUEST ends, so that is the
+    # moment its space returns. Objects that escaped their request keep their
+    # finalization time, because for those the GC really is the release event.
+    #
+    # System stays on finalization throughout: those objects live on the V8 heap
+    # and are genuinely freed by the collector.
+    # ------------------------------------------------------------------
+    if 'scope_end_ms' in df.columns:
+        # Whether an object is region-reclaimed is decided by POLICY, not by a
+        # measured escape flag: managed (Bump/Slab) call-sites allocate against
+        # the request's region, System ones do not. That mirrors exactly what
+        # _alloc-utils.js does at runtime, so the quota reflects the allocator
+        # that will actually run.
+        region_reclaimed = (
+            df['scope_end_ms'].notna() & (df['allocation_policy'] != 'System'))
+        df['release_time_ms'] = np.where(
+            region_reclaimed, df['scope_end_ms'], df['finalization_time_ms'])
+        # A request cannot release an object before it allocated it.
+        df['release_time_ms'] = np.maximum(
+            df['release_time_ms'], df['allocation_time_ms'])
+
+        shortened = (df['release_time_ms'] < df['finalization_time_ms']).sum()
+        print(f"\nRegion-reclaimed records: {region_reclaimed.sum():,} of {len(df):,}")
+        print(f"Records whose release precedes GC finalization: {shortened:,} "
+              f"({100 * shortened / max(len(df), 1):.2f}%)")
+    else:
+        print("\nWARNING: no scope data in the trace; peak demand will be computed")
+        print("from GC finalization and will over-state simultaneously-live memory.")
+        df['release_time_ms'] = df['finalization_time_ms']
+
     print(f"Loaded {len(df):,} finalized allocation records "
           f"across {df['call_site_hash'].nunique()} policy-assigned call-sites.\n")
     print("Records per policy:")
@@ -212,8 +254,8 @@ def calculate_quotas():
     if len(bump_df) > 0:
         starts = bump_df[['call_site_hash', 'allocation_time_ms', 'allocation_size_bytes']].rename(
             columns={'allocation_time_ms': 'time', 'allocation_size_bytes': 'delta'})
-        ends = bump_df[['call_site_hash', 'finalization_time_ms', 'allocation_size_bytes']].rename(
-            columns={'finalization_time_ms': 'time', 'allocation_size_bytes': 'delta'})
+        ends = bump_df[['call_site_hash', 'release_time_ms', 'allocation_size_bytes']].rename(
+            columns={'release_time_ms': 'time', 'allocation_size_bytes': 'delta'})
         ends['delta'] = -ends['delta']
         starts['is_start'] = 1
         ends['is_start'] = 0
@@ -241,8 +283,8 @@ def calculate_quotas():
         starts = slab_df[['size_class', 'allocation_time_ms']].rename(
             columns={'allocation_time_ms': 'time'})
         starts['delta'] = 1
-        ends = slab_df[['size_class', 'finalization_time_ms']].rename(
-            columns={'finalization_time_ms': 'time'})
+        ends = slab_df[['size_class', 'release_time_ms']].rename(
+            columns={'release_time_ms': 'time'})
         ends['delta'] = -1
         starts['is_start'] = 1
         ends['is_start'] = 0
