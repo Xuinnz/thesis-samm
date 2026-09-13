@@ -1,8 +1,17 @@
 # Variance Threshold Policy
 # This function decides whether to put the clusters into bump, slab, system
-# Currently, the highest lifespan is automatically put into the system. The remaining will be classified as bump or slab
-# To determine if a cluster is bump or slab, it will use median sigma^2 of all sites as a threshold
-# If it's lower than the median, classify as bump, else classify as slab
+# This script assigns the final memory allocation policy (Bump, Slab, or System) 
+# to each call-site using a two-phase decision matrix:
+#
+# 1. Scope Filter (System vs. Managed): 
+#    The temporal cluster with the highest structural overhang (escaping memory) 
+#    is automatically routed to the System Heap.
+#
+# 2. Predictability Filter (Bump vs. Slab): 
+#    The remaining request-scoped call-sites are split using a global variance 
+#    threshold (median sigma^2) to measure behavioral chaos.
+#    - Low Variance (<= median): Highly predictable. Routed to Bump (reclaimed at once).
+#    - High Variance (> median): Unpredictable. Routed to Slab (reclaimed at request-scope).
 
 import json
 import os
@@ -30,7 +39,14 @@ def assign_policies():
     )
 
     # Compute mean log-lifespan for each cluster
-    cluster_means = df.groupby("temporal_cluster")["mu_lifespan_log"].mean()
+    # Rank clusters by the same feature the clustering used, so "highest
+    # cluster" means the same thing in both steps. With scope-relative lifetime
+    # the highest cluster is the one whose objects outlive their request, which
+    # is a structural property rather than a load-dependent one.
+    rank_feature = ("overhang_log"
+                    if "overhang_log" in df.columns
+                    else "mu_lifespan_log")
+    cluster_means = df.groupby("temporal_cluster")[rank_feature].mean()
 
     # Identify the cluster with the highest average lifespan
     # It will be designated as System heap
@@ -40,7 +56,7 @@ def assign_policies():
 
     print(
         f"System-heap temporal cluster identified: cluster {system_cluster_id} "
-        f"(highest mean mu_lifespan_log = {cluster_means[system_cluster_id]:.4f})"
+        f"(highest mean {rank_feature} = {cluster_means[system_cluster_id]:.4f})"
     )
 
     # Filter it out
@@ -69,18 +85,25 @@ def assign_policies():
     df["allocation_policy"] = df.apply(assign_policy, axis=1)
 
     print("\nFinal policy assignment:")
-    print(
-        df[
-            [
-                "call_site_hash",
-                "mu_lifespan",
-                "sigma2",
-                "n_objects",
-                "temporal_cluster",
-                "allocation_policy",
-            ]
-        ].to_string(index=False)
-    )
+    policy_cols = ["call_site_hash", "mu_lifespan", "sigma2", "n_objects"]
+    for extra in ("died_in_request_rate", "median_overhang_ms"):
+        if extra in df.columns:
+            policy_cols.append(extra)
+    policy_cols += ["temporal_cluster", "allocation_policy"]
+    print(df[policy_cols].to_string(index=False))
+
+    # Retention check. Overhang cannot prove escape -- collection is lazy, so
+    # every call-site shows SOME overhang -- but a managed call-site whose
+    # overhang dwarfs the others is holding memory long past its request and is
+    # a candidate for System instead. Reported as an observation, not a verdict.
+    if "median_overhang_ms" in df.columns and df["median_overhang_ms"].notna().any():
+        managed = df[df["allocation_policy"] != "System"]
+        if len(managed) > 0:
+            worst = managed.loc[managed["median_overhang_ms"].idxmax()]
+            print(f"\nLargest overhang among managed call-sites: "
+                  f"{worst['call_site_hash']} at {worst['median_overhang_ms']:.1f} ms median.")
+            print("Overhang measures GC lag as well as retention, so this bounds")
+            print("retention from above rather than proving it.")
 
     # Output 
     output_csv = os.path.join(OUTPUT_DIR, "call_site_policy_assignment.csv")
@@ -91,6 +114,7 @@ def assign_policies():
         json.dump(
             {
                 "system_cluster_id": int(system_cluster_id),
+                "system_rank_feature": rank_feature,
                 "theta_v_global_variance_threshold": theta_v,
                 "non_system_call_site_count": len(non_system_df),
                 "policy_counts": df["allocation_policy"]
