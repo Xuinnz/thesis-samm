@@ -1,6 +1,8 @@
 # This file is the K-Means Clustering Algorithm. 
-# It clusters the callsites depending on their log-transformed lifespan
+# It clusters the callsites depending on their overhang_log
+# to separate the callsites which is request-scope and escaping
 # We use the discrete second derivative to check the optimal numbers of cluster
+# current minimum strata enforced is 3 (might need to be defended first, will probably change later)
 # This is an unsupervised Machine Learning.
 # INPUT: call_site_features_log_transformed.csv
 # OUTPUT: The callsites as well as their cluster ID.
@@ -62,7 +64,33 @@ def discover_strata():
     print(f"Loaded {n_sites} call-site feature vectors.\n")
 
     # Extract the lifespan log into 2D Numpy array
-    X = df[['mu_lifespan_log']].values 
+    # Cluster on scope-relative lifetime when the trace carries it, falling back
+    # to absolute lifespan otherwise.
+    #
+    # mu_lifespan_log measures time-to-finalization, which moves with GC
+    # scheduling rather than with the object's role: at 500 RPS every call-site's
+    # observed lifespan compressed (aggregate 25.5s -> 2.6s), the gap to
+    # fetch/process narrowed from 24x to 4.3x, and the clusters merged. The
+    # merged cluster became System, which pulled the two largest memory consumers
+    # out of the allocator and left 40MB of a 1GB pool for managed arenas.
+    #
+    # A lifetime expressed as a fraction of its own request does not compress
+    # with load: an object that lives for its request has a ratio near 1 at any
+    # RPS, and one that escapes sits above 1 regardless.
+    feature = ('overhang_log'
+               if 'overhang_log' in df.columns
+               else 'mu_lifespan_log')
+    if len(df) == 0:
+        raise SystemExit(
+            "ERROR: no call-sites survived preprocessing, so there is nothing to cluster.\n"
+            "       Usually this means the characterization run was too short or the\n"
+            "       minimum-objects filter in 02_aggregate_call_sites.py rejected every\n"
+            "       call-site. Check the row counts printed by phase 2.")
+
+    print(f"Clustering feature: {feature}"
+          + ("" if feature == 'overhang_log'
+             else "  (no scope trace; inherits GC-scheduling dependence)"))
+    X = df[[feature]].values 
 
     # Determine the max number of clusters to test, capped at 10
     # The max number of clusters is equal to how many call sites is there
@@ -147,7 +175,12 @@ def discover_strata():
     df['temporal_cluster'] = df['temporal_cluster'].map(relabel_map)
 
     print("\nCall-sites with assigned temporal cluster:")
-    print(df[['call_site_hash', 'mu_lifespan', 'mu_lifespan_log', 'sigma2', 'temporal_cluster']]
+    summary_cols = ['call_site_hash', 'mu_lifespan', 'mu_lifespan_log', 'sigma2']
+    for extra in ('median_overhang_ms', 'overhang_log'):
+        if extra in df.columns:
+            summary_cols.append(extra)
+    summary_cols.append('temporal_cluster')
+    print(df[summary_cols]
           .sort_values('mu_lifespan').to_string(index=False))
     # Save the dataframe back to a CSV. index=False stops pandas from writing row numbers.
     output_csv = os.path.join(OUTPUT_DIR, "call_site_temporal_clusters.csv")
@@ -162,6 +195,7 @@ def discover_strata():
             "wcss": inertias,
             "second_derivatives": second_derivatives,
             "selected_k": best_k,
+            "clustering_feature": feature,
             "elbow_k": elbow_k,
             "min_temporal_strata": MIN_TEMPORAL_STRATA,
             "k_source": "SAMM_KMEANS_K override" if os.environ.get("SAMM_KMEANS_K") else "elbow",
