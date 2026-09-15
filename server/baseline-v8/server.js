@@ -3,6 +3,7 @@
 const express = require('express');
 const registerRoutes = require('../routes/index');
 const profiler = require('../../profiler');
+const telemetry = require('../routes/_telemetry');
 
 const PORT = process.env.PORT || 3000;
 
@@ -19,6 +20,13 @@ app.use(express.json({limit: BODY_LIMIT}));
 
 registerRoutes(app);
 
+// GC pauses and heap fragmentation, when SAMM_TELEMETRY=true. Off by
+// default: the GC observer perturbs the run it measures.
+const telemetryOn = telemetry.start();
+app.get('/telemetry', (req, res) => {
+    res.status(200).json(telemetry.snapshot());
+});
+
 // global error handler
 app.use((err, req, res, next) => {
     console.error(`[error] ${req.method} ${req.path}`, err.message);
@@ -32,6 +40,7 @@ const server = app.listen(PORT, () => {
 
     const isProfilerOn = process.env.SHADOW_PROFILER_ENABLED === 'true';
     console.log(`[samm-baseline] shadow profiler: ${isProfilerOn ? 'ENABLED' : "DISABLED"}`);
+    console.log(`[samm-baseline] gc/heap telemetry: ${telemetryOn ? 'ENABLED (observer effect in play)' : 'DISABLED'}`);
 });
 
 //graceful shutdown
