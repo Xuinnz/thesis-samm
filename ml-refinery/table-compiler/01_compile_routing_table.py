@@ -91,9 +91,31 @@ BUMP_GROWTH_CHUNK = 2 * 1024 * 1024
 # full cycle ago and have long since been collected.
 #
 # A segment is untouched for (S-1)/S of a full cycle, so more segments preserve
-# more of the arena's natural safety margin. Eight keeps 87.5% of it while
-# leaving segments large enough to hold many objects each.
-BUMP_SEGMENTS_PER_FLOOR = 8
+# more of the arena's natural safety margin.
+#
+# WHY EIGHT WAS TOO FEW
+#
+# A segment resets only when EVERY object in it has died, so one late survivor
+# pins the whole segment. The cost of that is set by segment SIZE. At eight
+# segments per floor the payload call-site got 41.9 MB segments holding roughly
+# ten 4 MB objects each -- so a single surviving buffer held ~37 MB hostage.
+#
+# Measured: that arena could commit ~483 MB (334.9 MB floor plus the 148.7 MB
+# elastic pool), which is only 11.5 segments at that size, against a live set of
+# ~357 MB that needs 15-20 of them once pinning is accounted for. The result was
+# 9,329 blocked resets and 13.9% of allocations pushed to malloc -- and every
+# one of those was a budget refusal, with the pool sitting at 99.998% of its
+# ceiling.
+#
+# Smaller segments cut the pinned remainder proportionally. The trade is more
+# frequent advance() calls, which is a bounds check and a cursor reset, against
+# tens of megabytes held by a single object.
+BUMP_SEGMENTS_PER_FLOOR = int(os.environ.get("SAMM_BUMP_SEGMENTS_PER_FLOOR", 8))
+
+# Largest share of the pool handed out as non-revocable floors. The remainder
+# stays shared, so a stratum running above its characterized demand can borrow
+# rather than fall back to malloc. 1.0 restores the old behaviour.
+FLOOR_BUDGET_FRACTION = float(os.environ.get("SAMM_FLOOR_BUDGET_FRACTION", 0.70))
 
 # Load factor for the open-addressed routing table.
 MAX_LOAD = 0.5
@@ -223,6 +245,38 @@ def build_layout(quotas_json):
     """
     strata = quotas_json["strata_quotas"]
 
+    # ------------------------------------------------------------------
+    # GLOBAL FLOOR BUDGET
+    #
+    # A per-stratum quantile is not enough on its own. The floor is
+    # min(F_j, Q_j), and the quota script distributes exactly M_available across
+    # strata, so sum(Q_j) == M_available by construction. Whenever characterized
+    # demand exceeds the pool -- the normal case under memory pressure -- every
+    # F_j is larger than its Q_j, every floor collapses to Q_j, and the floors
+    # total 100% of the pool no matter what quantile was requested. Measured:
+    # introducing the quantile alone moved floors from 93.7% to 97.7% of the
+    # pool, i.e. the wrong way.
+    #
+    # So cap the TOTAL. Reserving at most this fraction as non-revocable leaves
+    # the rest as genuine shared elastic capacity -- which is the whole point of
+    # the elastic-quota design and which it has never actually had (27 MB of a
+    # 435.9 MB pool, then 10 MB). Strata scale proportionally, so their relative
+    # shares, the part the profile actually informs, are preserved.
+    m_available_bytes = int(quotas_json.get("m_available_bytes", 0))
+    floor_raw = {
+        sid: min(e.get("F_j_bytes", e["P_j_bytes"]), e["Q_j_bytes"])
+        for sid, e in strata.items()
+    }
+    floor_scale = 1.0
+    if m_available_bytes:
+        budget = FLOOR_BUDGET_FRACTION * m_available_bytes
+        total_floor = sum(floor_raw.values())
+        if total_floor > budget and total_floor > 0:
+            floor_scale = budget / total_floor
+            print(f"  floor budget      : {total_floor/2**20:>10,.1f} MB requested -> "
+                  f"{budget/2**20:,.1f} MB cap ({FLOOR_BUDGET_FRACTION:.0%} of pool, "
+                  f"scale {floor_scale:.3f})")
+
     layout = {}
     cursor = 0
     for stratum_id in sorted(strata.keys()):
@@ -237,7 +291,11 @@ def build_layout(quotas_json):
         # over-subscribed workload degrades to "no elastic headroom" instead of
         # refusing to build at all. page_floor, not page_ceil, because rounding
         # up could push the sum back over the budget it just respected.
-        floor = page_floor(min(entry["P_j_bytes"], entry["Q_j_bytes"]))
+        # F_j is a quantile of concurrent demand rather than its peak, so the
+        # non-revocable guarantee covers the common case and the tail draws on
+        # the shared elastic pool. Falls back to P_j for quota files written
+        # before F_j existed.
+        floor = page_floor(int(floor_raw[stratum_id] * floor_scale))
         span = page_ceil(max(entry["Q_j_bytes"] * ELASTIC_FACTOR, floor))
 
         if stratum_id.startswith("slab:"):
@@ -283,9 +341,19 @@ def compile_table(policy_csv, quotas_json_path, output_zig):
         call_site_hash = int(stratum_id.split(":", 1)[1])
         bump_index_by_hash[call_site_hash] = len(bump_arenas)
 
-        segment_bytes = max(
-            PAGE_SIZE,
-            (entry["floor"] // BUMP_SEGMENTS_PER_FLOOR // PAGE_SIZE) * PAGE_SIZE)
+        # A segment below the call-site's largest allocation can never serve it:
+        # alloc() refuses anything above segment_bytes and counts an oversize
+        # fallback, so every large request would bypass the arena entirely. That
+        # makes BUMP_SEGMENTS_PER_FLOOR unsafe to tune without this clamp -- at
+        # 32 segments this arena would drop to 10.5 MB segments against a 16 MB
+        # maximum payload, and silently route every big allocation to malloc.
+        want = (entry["floor"] // BUMP_SEGMENTS_PER_FLOOR // PAGE_SIZE) * PAGE_SIZE
+        need = ((quotas["strata_quotas"][stratum_id].get("max_alloc_bytes", 0)
+                 + PAGE_SIZE - 1) // PAGE_SIZE) * PAGE_SIZE
+        segment_bytes = max(PAGE_SIZE, want, need)
+        if need > want and want > 0:
+            print(f"  segment clamp     : {stratum_id} raised {want/2**20:.2f} -> "
+                  f"{segment_bytes/2**20:.2f} MB to fit its largest allocation")
         floor_segments = max(1, entry["floor"] // segment_bytes)
         max_segments = max(floor_segments, entry["span"] // segment_bytes)
 
@@ -349,6 +417,22 @@ def compile_table(policy_csv, quotas_json_path, output_zig):
             raise SystemExit(
                 f"ERROR: unknown allocation_policy '{policy}' for call-site "
                 f"{call_site_hash}. Expected one of: Bump, Slab, System.")
+
+    # Stamp the workload this table was fit against. The server compares its own
+    # fingerprint to this at boot and refuses to run on a mismatch -- the only
+    # thing standing between a silently-wrong quota set and a benchmark that
+    # looks valid but is measuring a model fit to a workload that never ran.
+    manifest_path = os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(quotas_json_path)),
+        "..", "..", "raw", "workload_manifest.json"))
+    if os.path.exists(manifest_path):
+        with open(manifest_path) as mf:
+            manifest = json.load(mf)
+        print(f"  workload          : {manifest.get('fingerprint', '?')}")
+    else:
+        manifest = {"fingerprint": "unknown", "parameters": {}}
+        print(f"  WARNING: no workload_manifest.json at {manifest_path}. The table "
+              f"will carry fingerprint 'unknown' and the server cannot verify it.")
 
     slots, max_probe = build_hash_table(routes)
 
@@ -414,6 +498,14 @@ def compile_table(policy_csv, quotas_json_path, output_zig):
     os.makedirs(os.path.dirname(output_zig), exist_ok=True)
     with open(output_zig, "w") as f:
         f.write(source)
+
+    # Sidecar the server reads at boot. Kept beside the JS wrapper rather than
+    # inside the .node binary so a mismatch is reported by Node with a readable
+    # message instead of a comptime failure nobody sees at run time.
+    sidecar = os.path.join(REPO_ROOT, "zig-allocator", "workload_fingerprint.json")
+    with open(sidecar, "w") as f:
+        json.dump(manifest, f, indent=2)
+    print(f"  fingerprint file  : {os.path.relpath(sidecar, REPO_ROOT)}")
 
     elapsed = time.time() - start_time
     print("\n" + "=" * 50)
