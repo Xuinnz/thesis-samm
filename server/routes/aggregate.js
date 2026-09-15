@@ -1,75 +1,74 @@
+// AGGREGATE ENDPOINT
+// This will simulate escaping objects (objects that lifespan is more than it's request scope)
+// It will also simulate High Size Variance and High Lifespan Variance (varying life, varying size)
+// Candidate for System Heap
+
 'use strict';
 
-// aggregate endpoint
-// this endpoint is specifically for persistent data
-// high lifespan targeting system heap
-const { allocateBuffer } = require('./_alloc-utils');
+const { allocateBuffer, writeWholeBuffer } = require('./_alloc-utils');
+const { requestRng } = require('./_rng');
 
-// global variance, anything put here will not be cleaned by gc
+// A global array acting as persistent cache.
+// Buffer placed here will not be garbage collected until they are evicted.
 const persistentStore = [];
 
-// max so it does not consume all ram
-const MAX_RETAINED_BYTES = 100 * 1024 * 1024;
-
-// track running total incrementally instead of reduce()-ing the full
-// array on every request — this call-site's own latency is part of
-// what the study measures, so an O(n) scan per request (n growing
-// with retained count) would add avoidable, unrelated overhead.
+// Tracks the running total bytes in the store.
 let totalRetainedBytes = 0;
 
-// IMPORTANT: aggregate intentionally does NOT draw from the same wide
-// Azure-derived payload distribution as process.js (up to ~824MB per
-// object). Sharing that distribution meant a single large draw could
-// exceed the entire MAX_RETAINED_BYTES budget on its own, forcing
-// near-immediate eviction of everything else in the store on almost
-// every request — which collapsed this call-site's observed lifespan
-// down to the same range as the short-lived endpoints (confirmed
-// empirically: mu_lifespan dropped from ~220,000ms to ~127ms once this
-// interaction was hit). A System-heap candidate is meant to model
-// small-but-numerous, long-lived server state (session cache entries,
-// connection pool metadata) — not occasional multi-hundred-MB payloads.
-// This narrow, independent range lets MAX_RETAINED_BYTES actually hold
-// dozens-to-hundreds of objects concurrently, producing genuine
-// sustained retention instead of near-constant eviction.
+// This maximum allowed size for the persistent store (default 50MB)
+const MAX_RETAINED_BYTES = (() => {
+  const raw = process.env.SAMM_RETAINED_BYTES;
+  if (raw === undefined || raw === '') return 50 * 1024 * 1024;
+  const n = Number(raw);
+  
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error(`SAMM_RETAINED_BYTES must be a positive byte count; got ${JSON.stringify(raw)}`);
+  }
+  return n;
+})();
+
+// Restrict allocations to between 64KB and 2MB.
+// This prevents a single massive request from wiping out the entire cache,
+// ensuring the store holds many concurrent objects rather than constantly evicting.
 const AGGREGATE_MIN_BYTES = 64 * 1024;        // 64KB
 const AGGREGATE_MAX_BYTES = 2 * 1024 * 1024;  // 2MB
 
-/**
- * Resolves this endpoint's own payload size, deliberately ignoring
- * the k6-sampled size_mb field used by process.js/batch.js. If a
- * caller supplies size_mb anyway (e.g. an older k6 script, or manual
- * testing), it is clamped into this endpoint's own range rather than
- * honored as-is — the server enforces its own bounds regardless of
- * what the request asks for.
- */
+// Determines the allocation size for this request.
+// It ignores external requests for massive sizes, strictly clamping them to the min/max bounds.
 function resolveAggregatePayloadBytes(req) {
-    const sizeMb = Number(req.body && req.body.size_mb);
-    if (Number.isFinite(sizeMb) && sizeMb > 0) {
-        const requestedBytes = Math.floor(sizeMb * 1024 * 1024);
-        return Math.min(Math.max(requestedBytes, AGGREGATE_MIN_BYTES), AGGREGATE_MAX_BYTES);
-    }
-    return Math.floor(
-        AGGREGATE_MIN_BYTES + Math.random() * (AGGREGATE_MAX_BYTES - AGGREGATE_MIN_BYTES)
-    );
+  const sizeMb = Number(req.body && req.body.size_mb);
+  
+  if (Number.isFinite(sizeMb) && sizeMb > 0) {
+    const requestedBytes = Math.floor(sizeMb * 1024 * 1024);
+    return Math.min(Math.max(requestedBytes, AGGREGATE_MIN_BYTES), AGGREGATE_MAX_BYTES);
+  }
+  
+  // If no valid size is requested, generate a random size within our bounds
+  return Math.floor(
+    AGGREGATE_MIN_BYTES + requestRng(req)() * (AGGREGATE_MAX_BYTES - AGGREGATE_MIN_BYTES)
+  );
 }
 
+// main aggregate function. allocates memory then write to memory. adds it to global cache
+// cleans up old data if the cache grown too large
 function aggregateRoute(req, res) {
     const bytes = resolveAggregatePayloadBytes(req);
-    const buffer = allocateBuffer(bytes, 'aggregate.js:aggregateRoute');
 
-    // push the buffer to the global heap
+    const buffer = allocateBuffer(bytes, 'aggregate.js:aggregateRoute', req);
+
+    writeWholeBuffer(buffer);
+
+    // push it into the global cache
     persistentStore.push({
         buffer,
         retainedAt: Date.now(),
         size: bytes,
     });
+    
+    // update the counter
     totalRetainedBytes += bytes;
 
-    // while, not if: a single incoming allocation could in principle
-    // still push us over budget by more than one evicted entry can
-    // recover in a single step, so keep evicting the oldest entry
-    // until back under budget rather than assuming one eviction
-    // suffices.
+    // if the current bytes exceeded max, we evict one by one until we have enough length.
     while (totalRetainedBytes > MAX_RETAINED_BYTES && persistentStore.length > 0) {
         const evicted = persistentStore.shift();
         totalRetainedBytes -= evicted.size;

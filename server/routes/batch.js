@@ -1,37 +1,42 @@
-//batch route
-// tests density and throughput
-// simulates a server unpacking an array of 200 JSON objects all at once
-
+// BATCH ENDPOINT
+// Simulates multiple concurrent, short-lived allocations
+// varying size, fixed life
+// candidate for bump allocator
 'use strict';
 
-const { allocateBuffer, simulateProcessing } = require('./_alloc-utils');
+const { allocateBuffer, writeWholeBuffer } = require('./_alloc-utils');
+const { requestRng } = require('./_rng');
 
-// simulating a batch transformation
-// 200 items, each between 1KB and 32KB
+// defines the shape of the simulated batch workload.
+// 200 items per request, each sized randomly between 1KB and 32KB.
 const DEFAULT_BATCH_ITEMS = 200;
 const ITEM_MIN_BYTES = 1 * 1024;
 const ITEM_MAX_BYTES = 32 * 1024;
 
-function randomItemBytes(){
-    return ITEM_MIN_BYTES + Math.floor(Math.random() * (ITEM_MAX_BYTES - ITEM_MIN_BYTES));
+function randomItemBytes(rng){
+    return ITEM_MIN_BYTES + Math.floor(rng() * (ITEM_MAX_BYTES - ITEM_MIN_BYTES));
 }
 
-// burst generator endpoint
-// produce many concurrect short lived allocations within a single event loop
-function batchRoute(req, res) {
+// Burst generator endpoint
+// Produces many concurrent, short-lived allocations in one event loop tick
+function batchRoute(req, res){
     const itemCount = Number(req.body && req.body.item_count) || DEFAULT_BATCH_ITEMS;
     const safeCount = Math.min(Math.max(itemCount, 1), 2000);
 
+    const rng = requestRng(req);
     let totalBytes = 0;
-    let checksumAllumulator = 0;
+    let checksumAccumulator = 0;
 
-    // since for loop is synchronous, v8 must finish the entire loop before it can pause
-    // to run GC or answer another req 
+    // synchronous loop blocks the event loop
+    // V8 must finish allocating every item before it can pause to run GC
     for (let i = 0; i < safeCount; i += 1){
-        const bytes = randomItemBytes();
+        const bytes = randomItemBytes(rng);
+        
+        // allocate memory for this individual item
+        const buffer = allocateBuffer(bytes, 'batch.js:batchRoute', req);
 
-        const buffer = allocateBuffer(bytes, 'batch.js:batchRoute');
-        checksumAllumulator = (checksumAllumulator + simulateProcessing(buffer));
+        // simulate fully processing the item
+        checksumAccumulator = (checksumAccumulator + writeWholeBuffer(buffer));
 
         totalBytes += bytes;
     }
@@ -40,7 +45,7 @@ function batchRoute(req, res) {
         route: 'batch',
         item_count: safeCount,
         total_bytes: totalBytes,
-        checkSum: checksumAllumulator,
+        checksum: checksumAccumulator, // Fixed casing (was checkSum)
     });
 }
 

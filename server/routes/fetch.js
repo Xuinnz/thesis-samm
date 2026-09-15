@@ -1,29 +1,36 @@
-// fetch endpoint
-// this forces the v8 engine to keep the allocated memory alive while it waits for a simulated network response
-// also have a jitter on the latency and size.
-// medium lifespan, low variance.
+// FETCH
+// Forces the engine to hold onto allocated memory while waiting for an external response.
+// Tests low size variance / high variance lifetime
+// candidate for slab
 
 'use strict';
 
-const { allocateBuffer, simulateProcessing } = require('./_alloc-utils');
+const { allocateBuffer, writeWholeBuffer } = require('./_alloc-utils');
 
-//Base size of 64KB with +/- 8KB jitter
-const FETCH_BASE_BYTES = 64 * 1024;
-const FETCH_JITTER_BYTES = 8 * 1024;
+// Defines the size of the receive buffer (default 1MB)
+// 1MB is chosen because it fits perfectly into a predefined memory "slab" 
+// without wasting space, and it keeps CPU page faults manageable during stress tests.
+const FETCH_BASE_BYTES = (() => {
+  const raw = process.env.FETCH_BYTES;
+  if (raw === undefined || raw === '') return 1 * 1024 * 1024;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error(`FETCH_BYTES must be a positive byte count; got ${JSON.stringify(raw)}`);
+  }
+  return n;
+})();
 
-function randomJitterBytes(){
-    return Math.floor((Math.random() * 2 - 1) * FETCH_JITTER_BYTES);
-}
 
 async function fetchRoute(req, res) {
-    const bytes = FETCH_BASE_BYTES + randomJitterBytes();
+    const bytes = FETCH_BASE_BYTES;
 
-    const buffer = allocateBuffer(bytes, 'fetch.js:fetchRoute');
+    const buffer = allocateBuffer(bytes, 'fetch.js:fetchRoute', req);
     const holdMs = Number(req.body && req.body.hold_ms) || 10;
 
     await new Promise((resolve) => setTimeout(resolve, holdMs));
 
-    const checksum = simulateProcessing(buffer);
+    // A receive buffer is filled end to end by the transfer that fills it.
+    const checksum = writeWholeBuffer(buffer);
 
     res.status(200).json({
         route: 'fetch',
