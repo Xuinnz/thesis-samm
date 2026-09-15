@@ -46,6 +46,7 @@
 import http from 'k6/http';
 import { Trend } from 'k6/metrics';
 import { sleep } from 'k6';
+import exec from 'k6/execution';
 import { SharedArray } from 'k6/data'; // <-- The memory savior
 
 const {
@@ -97,12 +98,24 @@ const MAX_VUS = Number(__ENV.MAX_VUS) || 300;
 // Relative weights for which endpoint archetype a given iteration hits.
 // Overridable as a JSON string via __ENV.ENDPOINT_WEIGHTS, e.g.:
 //   -e ENDPOINT_WEIGHTS='{"cache":0.5,"fetch":0.2,"process":0.2,"aggregate":0.05,"batch":0.05}'
+// Chosen so each allocation POLICY carries a comparable share of live memory,
+// rather than one quadrant dominating the result. Live bytes are lambda x W x
+// size (Little's Law), so weight is the only free variable once size and hold
+// are fixed by the quadrant each endpoint represents:
+//
+//   fetch   0.25 -> 95 rps x 0.58s x 4MB   ~= 220 MB   (Slab)
+//   process 0.25 -> 95 rps x 0.80s x ~4MB  ~= 304 MB   (Bump)
+//   cache / batch      no hold, so ~0 MB live -- they test allocation RATE
+//   aggregate          retained, so its 50MB is independent of weight
+//
+// cache drops 0.40 -> 0.35 to fund process; a cache-dominated mix is still the
+// realistic shape for this service class.
 const DEFAULT_ENDPOINT_WEIGHTS = {
-  cache: 0.4,
+  cache: 0.35,
   fetch: 0.25,
-  process: 0.2,
+  process: 0.25,
   aggregate: 0.05,
-  batch: 0.1,
+  batch: 0.10,
 };
 const ENDPOINT_WEIGHTS = __ENV.ENDPOINT_WEIGHTS
   ? JSON.parse(__ENV.ENDPOINT_WEIGHTS)
@@ -128,6 +141,26 @@ const schedule = simulateSchedule(
 const stages = buildK6Stages(schedule, STAGE_MERGE_TOLERANCE_RPS);
 
 const { mu, sigma } = parseJitterParams(open(JITTER_PARAMS_PATH));
+
+// Multiplier on hold time, applied as a shift of mu.
+
+// For a log-normal, adding ln(k) to mu multiplies every draw by k while leaving
+// sigma -- the SHAPE of the Azure-fitted distribution -- exactly as fitted. It
+// is the same class of transform as the payload rescale on the server side.
+//
+// WHY THIS IS THE MEMORY KNOB
+//
+// Live bytes = arrival rate x lifetime x size (Little's Law), while CPU cost is
+// arrival rate x faults. Hold time appears in the first and not the second: a
+// held buffer is a timer, not work. So this raises memory pressure at zero CPU
+// cost, which payload size cannot do and which a larger retained cache can only
+// do by adding a constant BOTH conditions must hold -- inflating the total and
+// shrinking every percentage difference being measured.
+//
+// Raising it raises concurrency by the same factor (L = lambda x W), so MAX_VUS
+// must rise with it or the arrival rate cannot be sustained.
+const HOLD_SCALE = Number(__ENV.HOLD_SCALE) || 1;
+const muHold = mu + Math.log(HOLD_SCALE);
 
 
 // Put BOTH the open() call and the heavy parsing strictly inside the SharedArray.
@@ -173,8 +206,27 @@ const endpointCumulative = [];
   }
 }
 
-function pickEndpoint() {
-  const r = Math.random() * endpointCumulative[endpointCumulative.length - 1].cumulative;
+// One deterministic RNG per ITERATION INDEX.
+//
+// Keyed on the global iteration counter, not on __VU. Under an open model k6
+// hands each scheduled iteration to whichever VU happens to be free, so the
+// iteration-to-VU mapping changes between runs; seeding per VU would leave the
+// request stream non-reproducible. Keyed on the iteration index, iteration N
+// draws the same endpoint, payload and hold every time, whichever VU runs it.
+
+// It makes the allocator comparison PAIRED: give both conditions the same seed
+// and they serve a byte-identical request stream, so workload variance cancels
+// out of the difference instead of inflating it. 
+function seedFor(rng) { return Math.floor(rng() * 2147483647); }
+
+function iterationRng() {
+  const idx = exec.scenario.iterationInTest;
+  if (SCHEDULE_SEED === undefined) return Math.random;
+  return makeRng((SCHEDULE_SEED ^ Math.imul(idx + 1, 0x9e3779b1)) >>> 0);
+}
+
+function pickEndpoint(rng) {
+  const r = (rng || Math.random)() * endpointCumulative[endpointCumulative.length - 1].cumulative;
   for (const entry of endpointCumulative) {
     if (r <= entry.cumulative) return entry.name;
   }
@@ -220,43 +272,54 @@ function recordProcessing(res, holdMs) {
 }
 
 
-function doCache() {
+function doCache(rng) {
   return recordProcessing(http.post(`${BASE_URL}/api/cache`, null, {
     headers: { 'Content-Type': 'application/json' },
   }), 0);
 }
 
-function doFetch() {
-  const holdMs = sampleHoldMs(mu, sigma); 
+function doFetch(rng) {
+  const holdMs = sampleHoldMs(muHold, sigma, rng);
   const payload = JSON.stringify({ hold_ms: holdMs });
   return recordProcessing(http.post(`${BASE_URL}/api/fetch`, payload, {
     headers: { 'Content-Type': 'application/json' },
   }), holdMs);
 }
 
-function doProcess() {
-  const sizeMb = samplePayloadMb();
-  const holdMs = sampleHoldMs(mu, sigma);
-  const payload = JSON.stringify({ size_mb: sizeMb, hold_ms: holdMs });
+// process holds for a FIXED duration, not an Azure-sampled one.
+
+// A small jitter is kept because a perfectly constant downstream latency is not realistic
+const PROCESS_HOLD_MS = Number(__ENV.PROCESS_HOLD_MS) || 600;
+
+// Jitter as a FRACTION of the hold, not an absolute number of milliseconds.
+const PROCESS_HOLD_JITTER_FRAC = Number(__ENV.PROCESS_HOLD_JITTER_FRAC || 0.0333);
+const PROCESS_HOLD_JITTER_MS = __ENV.PROCESS_HOLD_JITTER_MS !== undefined
+  ? Number(__ENV.PROCESS_HOLD_JITTER_MS)
+  : PROCESS_HOLD_MS * PROCESS_HOLD_JITTER_FRAC;
+
+function doProcess(rng) {
+  const sizeMb = samplePayloadMb(rng);
+  const holdMs = PROCESS_HOLD_MS + (rng() * 2 - 1) * PROCESS_HOLD_JITTER_MS;
+  const payload = JSON.stringify({ size_mb: sizeMb, hold_ms: holdMs, rng_seed: seedFor(rng) });
   return recordProcessing(http.post(`${BASE_URL}/api/process`, payload, {
     headers: { 'Content-Type': 'application/json' },
   }), holdMs);
 }
 
-function doAggregate() {
-  const sizeMb = samplePayloadMb();
-  const payload = JSON.stringify({ size_mb: sizeMb });
+function doAggregate(rng) {
+  const sizeMb = samplePayloadMb(rng);
+  const payload = JSON.stringify({ size_mb: sizeMb, rng_seed: seedFor(rng) });
   return recordProcessing(http.post(`${BASE_URL}/api/aggregate`, payload, {
     headers: { 'Content-Type': 'application/json' },
   }), 0);
 }
 
-function doBatch() {
+function doBatch(rng) {
   // Batch item count scaled loosely off the sampled payload magnitude
   // so batch bursts also inherit realistic size variance rather than
   // a fixed item count on every call.
-  const itemCount = Math.max(10, Math.min(2000, Math.round(samplePayloadMb() * 2)));
-  const payload = JSON.stringify({ item_count: itemCount });
+  const itemCount = Math.max(10, Math.min(2000, Math.round(samplePayloadMb(rng) * 2)));
+  const payload = JSON.stringify({ item_count: itemCount, rng_seed: seedFor(rng) });
   return recordProcessing(http.post(`${BASE_URL}/api/batch`, payload, {
     headers: { 'Content-Type': 'application/json' },
   }), 0);
@@ -271,11 +334,8 @@ const ENDPOINT_HANDLERS = {
 };
 
 export default function samLoadIteration() {
-  const endpoint = pickEndpoint();
+  const rng = iterationRng();
+  const endpoint = pickEndpoint(rng);
   const handler = ENDPOINT_HANDLERS[endpoint];
-  handler();
-
-  // const thinkMs = sampleThinkTimeMs(mu, sigma);
-  // sleep(thinkMs / 1000); // k6 sleep() takes seconds
-  // removed client side jitter
+  handler(rng);
 }
