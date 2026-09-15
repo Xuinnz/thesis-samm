@@ -27,7 +27,15 @@ POLICY_PATH = "../../datasets/shadow-telemetry/intermediate/ml-refinery/call_sit
 OUTPUT_DIR = "../../datasets/shadow-telemetry/intermediate/ml-refinery"
 
 # Container limit 1GB
-CONTAINER_HEAP_CEILING_BYTES = 1024 * 1024 * 1024
+# Container memory limit the quotas are sized against. Every downstream number
+# -- pool_hard_limit, M_available, every floor -- is derived from it, so a table
+# compiled for one container size is invalid in any other. Overridable because
+# it was hardcoded, and a limit sweep silently ran a 1024MB-derived table inside
+# 600-850MB containers: the pool believed it owned 495.7MB of a 600MB box and
+# every run failed within seconds while the workload fingerprint still reported
+# "verified". The fingerprint now carries the container size for this reason.
+CONTAINER_HEAP_CEILING_BYTES = int(os.environ.get(
+    "SAMM_CONTAINER_BYTES", 1024 * 1024 * 1024))
 
 # Base memory required by the V8 runtime engine
 # TODO: Flagging because it's hardcoded. currently no backup that supports this
@@ -37,13 +45,34 @@ NODE_V8_BASELINE_BYTES = 80 * 1024 * 1024
 # TODO: Also flagging because no back up.
 GENERAL_SAFETY_MARGIN_BYTES = 32 * 1024 * 1024
 
+# Quantile of concurrent demand that each stratum gets as a non-revocable floor.
+# 1.0 reproduces the old behaviour (floor = peak, no elastic headroom).
+FLOOR_QUANTILE = float(os.environ.get("SAMM_FLOOR_QUANTILE", 0.90))
+
 # 15% multiplier for system peak concurrency.
 # TODO: Also hard coded. good for now
 SAFETY_MULTIPLIER = 1.15
 
-# Fraction of the remaining pool to distribute
-# 1.0 to allocate 100% of available memory across arenas
-BETA_UTILIZATION_FRACTION = 1.0
+# Fraction of the remaining pool to distribute across arenas.
+#
+# WHY THIS MUST BE BELOW 1.0
+#
+# pool_hard_limit already subtracts the V8 baseline, the System-stratum
+# high-water and a safety margin -- but NOT the capacity fallback path. Every
+# allocation the pool refuses goes to malloc, and those bytes live outside the
+# pool's accounting entirely. At beta = 1.0 the arena claims every byte not
+# otherwise reserved, so the fallback path has nowhere to live.
+#
+# That was survivable only while the benchmark wrote a fraction of each buffer:
+# a 755.6 MB committed pool cost roughly 190 MB resident at a 25% touch cap, so
+# the overrun was hidden. Once every route writes what it claims to use,
+# committed and resident converge -- measured 712 MB committed and 821 MB RSS at
+# only 30 concurrent requests -- and the container is OOM-killed within seconds
+# of real load (exit 137, OOMKilled=true).
+#
+# Beta is the pool's counterpart to SAFETY_MULTIPLIER on the System stratum:
+# headroom for demand the characterization did not see.
+BETA_UTILIZATION_FRACTION = float(os.environ.get("SAMM_BETA_UTILIZATION", 0.75))
 
 # Minimum bucket size for slab allocation
 MIN_SLAB_CLASS_BYTES = 64
@@ -114,6 +143,34 @@ def peak_concurrent(events_df, group_col, value_col, tie_break_col):
     sorted_events = events_df.sort_values(['time', tie_break_col], ascending=[True, False])
     sorted_events['running'] = sorted_events.groupby(group_col)[value_col].cumsum()
     return sorted_events.groupby(group_col)['running'].max()
+
+
+# Quantile of concurrent demand, used for the GUARANTEED FLOOR.
+#
+# WHY THE FLOOR SHOULD NOT BE THE PEAK
+#
+# A floor is reserved at startup and is never revocable, so every byte of floor
+# is a byte the shared elastic pool cannot lend to whichever stratum is busy
+# right now. Setting floors at each stratum's PEAK reserves for a worst case
+# that the strata do not reach simultaneously, and the arithmetic is brutal:
+# measured, guaranteed floors came to 408.6 MB of a 435.9 MB pool -- 93.7% --
+# leaving 27 MB of elastic headroom. The elastic-quota design was present but
+# had nothing to work with, so any demand above the characterized peak went
+# straight to malloc.
+#
+# Sizing floors at a high quantile instead keeps the guarantee meaningful for
+# the common case and lets the tail draw on shared capacity, which is what the
+# shared pool is for. The span (P_j, below) still covers the peak, so nothing
+# is capped lower than before -- only the non-revocable portion shrinks.
+#
+# Caveat worth stating: this quantile is over EVENTS, not time-weighted, so
+# moments with many allocations carry more weight than quiet ones. At steady
+# arrival rates the two are close, and the bias is toward busy periods, which
+# is the conservative direction for a floor.
+def concurrent_quantile(events_df, group_col, value_col, tie_break_col, q):
+    sorted_events = events_df.sort_values(['time', tie_break_col], ascending=[True, False])
+    sorted_events['running'] = sorted_events.groupby(group_col)[value_col].cumsum()
+    return sorted_events.groupby(group_col)['running'].quantile(q)
 
 
 def calculate_quotas():
@@ -246,6 +303,8 @@ def calculate_quotas():
 
     # strata dict maps: stratum_identifier -> peak_observed_demand_in_bytes (P_j)
     strata = {}
+    floors = {}   # F_j: non-revocable guarantee, a quantile of concurrent demand
+    max_allocs = {}  # largest single allocation per stratum
 
     # Computation for Bump allocator
     # Bump allocators serve specific call sites with lifecycles tied to linear scopes.
@@ -263,8 +322,17 @@ def calculate_quotas():
         
         # Calculate peak concurrent byte occupancy per call_site_hash.
         bump_hwm = peak_concurrent(bump_events, 'call_site_hash', 'delta', 'is_start')
+        bump_floor = concurrent_quantile(bump_events, 'call_site_hash', 'delta',
+                                         'is_start', FLOOR_QUANTILE)
+        bump_max = bump_df.groupby('call_site_hash')['allocation_size_bytes'].max()
         for call_site, hwm_bytes in bump_hwm.items():
             strata[f"bump:{call_site}"] = int(hwm_bytes)
+            floors[f"bump:{call_site}"] = max(0, int(bump_floor.get(call_site, 0)))
+            # Largest single allocation. A bump segment smaller than this can
+            # never serve it -- alloc() refuses anything above segment_bytes and
+            # counts it as an oversize fallback -- so the compiler needs this to
+            # keep segment sizing safe when it is tuned.
+            max_allocs[f"bump:{call_site}"] = int(bump_max.get(call_site, 0))
     
     # Computation for Slab Allocator
     # Each size class is treated as a stratum: "slab:<size_class>".
@@ -292,10 +360,13 @@ def calculate_quotas():
         
         # Peak concurrent slots needed per size class.
         slot_hwm = peak_concurrent(slab_events, 'size_class', 'delta', 'is_start')
+        slot_floor = concurrent_quantile(slab_events, 'size_class', 'delta',
+                                         'is_start', FLOOR_QUANTILE)
 
         # Convert peak concurrent slots into total byte demand: slots * class_size.
         for size_class in slab_classes:
             peak_slots = int(slot_hwm.get(size_class, 0))
+            floors[f"slab:{size_class}"] = max(0, int(slot_floor.get(size_class, 0))) * size_class
             strata[f"slab:{size_class}"] = peak_slots * size_class
 
     print(f"\nUnified stratum high-watermarks (P_j), {len(strata)} strata:")
@@ -314,7 +385,9 @@ def calculate_quotas():
     if total_p > 0:
         for stratum_id, p_j in strata.items():
             q_j = (p_j / total_p) * m_available_bytes
-            quotas[stratum_id] = {"P_j_bytes": p_j, "Q_j_bytes": int(q_j)}
+            quotas[stratum_id] = {"P_j_bytes": p_j, "Q_j_bytes": int(q_j),
+                                  "F_j_bytes": int(floors.get(stratum_id, p_j)),
+                                  "max_alloc_bytes": int(max_allocs.get(stratum_id, 0))}
     else:
         print("\nWARNING: no Bump or Slab allocations observed.")
 
@@ -331,6 +404,7 @@ def calculate_quotas():
     output = {
         "container_ceiling_bytes": CONTAINER_HEAP_CEILING_BYTES,
         "node_v8_baseline_bytes": NODE_V8_BASELINE_BYTES,
+        "floor_quantile": FLOOR_QUANTILE,
         "system_high_watermark_bytes": system_hwm_bytes,
         "system_reservation_bytes": system_reservation_bytes,
         "general_safety_margin_bytes": GENERAL_SAFETY_MARGIN_BYTES,
