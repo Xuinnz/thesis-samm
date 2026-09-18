@@ -1,6 +1,6 @@
 // FETCH
 // Forces the engine to hold onto allocated memory while waiting for an external response.
-// Tests low size variance / high variance lifetime
+// fixed size / varying life
 // candidate for slab
 
 'use strict';

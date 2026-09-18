@@ -15,7 +15,7 @@
 #    narrow sizes                  -> Slab   (one class, no waste; individual
 #                                             slot reuse tolerates interleaving)
 #    wide sizes, steady occupancy  -> Bump   (no rounding, no pinning)
-#    wide sizes, chaotic occupancy -> Bump, FLAGGED: neither structure fits.
+#    wide sizes, chaotic occupancy -> System.
 #
 # WHY TWO AXES
 #
