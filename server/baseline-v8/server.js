@@ -18,7 +18,13 @@ const app = express();
 //apply the body limimt to the JSON parser
 app.use(express.json({limit: BODY_LIMIT}));
 
-registerRoutes(app);
+// ---------------------------------------------------------------------
+// OBSERVATION ENDPOINTS -- registered BEFORE registerRoutes(), matching the
+// SAMM image exactly. registerRoutes() installs regionMiddleware; anything
+// after it is seen by that middleware, and on the SAMM side that means a real
+// region opened and closed per poll. Keeping both images' observation
+// endpoints ahead of it is what makes polling cost the same on either side.
+// ---------------------------------------------------------------------
 
 // GC pauses and heap fragmentation, when SAMM_TELEMETRY=true. Off by
 // default: the GC observer perturbs the run it measures.
@@ -26,6 +32,20 @@ const telemetryOn = telemetry.start();
 app.get('/telemetry', (req, res) => {
     res.status(200).json(telemetry.snapshot());
 });
+
+// Present ONLY so the metrics collector can poll both images identically.
+//
+// There is no allocator here -- this is the control condition -- so it answers
+// with a null and the collector renders an empty allocator panel. What matters
+// is that both containers receive the same request at the same rate, parse the
+// same amount, and spend the same event-loop turn answering it. Polling only
+// the SAMM container would hand the condition under test a cost its control
+// never pays, which is how instrumentation ends up inside the measurement.
+app.get('/samm/stats', (req, res) => {
+    res.status(200).json({ allocator: null });
+});
+
+registerRoutes(app);
 
 // global error handler
 app.use((err, req, res, next) => {
