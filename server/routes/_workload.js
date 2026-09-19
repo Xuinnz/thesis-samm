@@ -65,12 +65,13 @@ function workloadParameters() {
     // the compiled table exactly as a server-side change would.
     process_hold_ms: String(envOr('PROCESS_HOLD_MS', '600')),
     endpoint_weights: String(envOr('ENDPOINT_WEIGHTS',
-      'cache:0.35,fetch:0.25,process:0.25,aggregate:0.05,batch:0.10')),
+      'cache:0.25,fetch:0.25,process:0.25,ingest:0.10,aggregate:0.05,batch:0.10')),
     fetch_bytes: String(envOr('FETCH_BYTES', 1 * 1024 * 1024)),
     cache_bytes: String(4 * 1024),
     batch_items: String(200),
     batch_item_range: '1024-32768',
     aggregate_range: '65536-2097152',
+    ingest_range: '65536-1048576',
   };
 }
 

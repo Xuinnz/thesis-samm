@@ -6,6 +6,7 @@ const fetchRoute = require('./fetch')
 const processRoute = require('./process');
 const aggregateRoute = require('./aggregate');
 const batchRoute = require('./batch');
+const ingestRoute = require('./ingest');
 const { regionMiddleware } = require('./_alloc-utils');
 const { workloadFingerprint } = require('./_workload');
 
@@ -28,6 +29,8 @@ function registerRoutes(app){
     app.post('/api/aggregate', aggregateRoute);
 
     app.post('/api/batch', batchRoute);
+
+    app.post('/api/ingest', ingestRoute);
 }
 
 module.exports = registerRoutes;
