@@ -108,12 +108,16 @@ const MAX_VUS = Number(__ENV.MAX_VUS) || 300;
 //   cache / batch      no hold, so ~0 MB live -- they test allocation RATE
 //   aggregate          retained, so its 50MB is independent of weight
 //
-// cache drops 0.40 -> 0.35 to fund process; a cache-dominated mix is still the
-// realistic shape for this service class.
+// cache drops 0.40 -> 0.35 to fund process, then 0.35 -> 0.25 to fund ingest --
+// cache holds ~0 bytes live, so taking share from it adds ingest's load without
+// moving the memory the other quadrants contribute.
+//
+//   ingest  0.10 -> 38 rps x 0.58s x ~0.53MB  ~= 12 MB   (the hard quadrant)
 const DEFAULT_ENDPOINT_WEIGHTS = {
-  cache: 0.35,
+  cache: 0.25,
   fetch: 0.25,
   process: 0.25,
+  ingest: 0.10,
   aggregate: 0.05,
   batch: 0.10,
 };
@@ -161,6 +165,15 @@ const { mu, sigma } = parseJitterParams(open(JITTER_PARAMS_PATH));
 // must rise with it or the arrival rate cannot be sustained.
 const HOLD_SCALE = Number(__ENV.HOLD_SCALE) || 1;
 const muHold = mu + Math.log(HOLD_SCALE);
+
+// ingest holds on the BASE Azure distribution at k = 1, not fetch's x4.
+//
+// HOLD_SCALE is 4/k across the load table, so HOLD_SCALE/4 is exactly 1/k: at
+// every load point ingest's hold shrinks by the same factor as arrival rate
+// grows, keeping its lambda x W -- and its live bytes -- constant, which is the
+// invariant the whole load sweep depends on.
+const INGEST_SCALE = HOLD_SCALE / 4;
+const muIngest = mu + Math.log(INGEST_SCALE);
 
 
 // Put BOTH the open() call and the heavy parsing strictly inside the SharedArray.
@@ -314,6 +327,16 @@ function doAggregate(rng) {
   }), 0);
 }
 
+function doIngest(rng) {
+  // Draw order is fixed -- hold first, then the server's seed -- so iteration N
+  // produces identical work on every run.
+  const holdMs = sampleHoldMs(muIngest, sigma, rng);
+  const payload = JSON.stringify({ hold_ms: holdMs, rng_seed: seedFor(rng) });
+  return recordProcessing(http.post(`${BASE_URL}/api/ingest`, payload, {
+    headers: { 'Content-Type': 'application/json' },
+  }), holdMs);
+}
+
 function doBatch(rng) {
   // Batch item count scaled loosely off the sampled payload magnitude
   // so batch bursts also inherit realistic size variance rather than
@@ -331,6 +354,7 @@ const ENDPOINT_HANDLERS = {
   process: doProcess,
   aggregate: doAggregate,
   batch: doBatch,
+  ingest: doIngest,
 };
 
 export default function samLoadIteration() {
