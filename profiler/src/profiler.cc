@@ -25,6 +25,9 @@
   additional (v3): v3 (Scope Tracking): Added request-boundary tracking to overcome GC non-determinism.
   This introduces a `scope_id` to link every memory allocation to its specific HTTP request.
   It outputs a second file, `scope_trace.csv`, containing the exact start and end times of every request.
+
+  this feature will be used to check if the callsite is request-scope (can be freed at the time of request ending, can use samm)
+  or escaping (the object persists even after the request ended, routed to system heap).
 */
 
 /*
