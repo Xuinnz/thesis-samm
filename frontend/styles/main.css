@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+.stage-item {
+  opacity: 0.45;
+  transform: translateX(-8px);
+  font-weight: 400;
+  border-radius: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  transition: all 0.35s ease;
+}
+
+.stage-item.active {
+  opacity: 1;
+  transform: translateX(0);
+  font-weight: 700;
+  background-color: rgba(37, 99, 235, 0.12);
+}

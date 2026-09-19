@@ -1,0 +1,11 @@
+{
+  "name": "samm-dashboard",
+  "private": true,
+  "scripts": {
+    "build:css": "tailwindcss -i ./styles/main.css -o ./styles/output.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^4",
+    "@tailwindcss/cli": "^4"
+  }
+}

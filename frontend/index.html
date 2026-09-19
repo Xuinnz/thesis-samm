@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SAMM Dashboard</title>
+  <link rel="stylesheet" href="styles/output.css">
+  <script src="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.iife.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css">
+</head>
+<body class="min-h-screen min-w-[1440px] bg-[#e8edf4] text-slate-900 antialiased">
+  <header class="flex w-full flex-nowrap items-center justify-between bg-white px-8 py-4 shadow-sm">
+    <div class="flex shrink-0 items-center gap-3">
+      <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-200 text-lg font-bold text-slate-600">S</div>
+      <div class="flex flex-col leading-tight">
+        <span class="text-base font-bold tracking-tight">SAMM</span>
+        <span class="text-xs text-slate-500">Dashboard</span>
+      </div>
+    </div>
+    <div class="flex shrink-0 items-center gap-4">
+      <button id="test-btn" type="button" class="whitespace-nowrap rounded-full border-2 border-slate-900 bg-white px-5 py-2 text-sm font-semibold text-slate-900">Test with K6</button>
+      <button id="boost-btn" type="button" class="whitespace-nowrap rounded-full bg-[#0b1428] px-5 py-2 text-sm font-semibold text-white">Boost with SAMM</button>
+      <a href="#" class="whitespace-nowrap text-sm text-slate-500 underline-offset-2 hover:underline">Need Help?</a>
+    </div>
+  </header>
+
+  <main class="grid grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-6 px-8 py-6">
+    <section class="flex flex-col gap-5">
+      <h1 id="status-headline" class="text-5xl font-bold tracking-tight text-[#0b1428]"></h1>
+
+      <div class="rounded-2xl bg-white p-5 shadow-sm">
+        <div class="mb-3 flex items-center justify-between">
+          <h2 class="text-base font-semibold text-slate-800">Memory Density Tracker</h2>
+          <span id="memory-density-current" class="text-sm font-bold text-slate-800"></span>
+        </div>
+        <div id="memory-density-blocks" class="flex gap-1"></div>
+        <div class="mt-3 flex w-full items-center justify-between text-xs text-slate-500">
+          <span>10MB</span>
+          <span class="rounded-full bg-[#0b1428] px-2 py-0.5 font-medium text-white">50MB</span>
+          <span>100MB</span>
+        </div>
+      </div>
+
+      <div class="flex min-h-80 flex-col rounded-2xl bg-[#0b1428] p-6 text-white">
+        <h2 class="mb-4 text-center text-lg font-semibold">Arena</h2>
+        <div id="arena-content" class="flex flex-1 items-center justify-center"></div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-4">
+        <div class="overflow-hidden rounded-2xl bg-[#0b1428] text-white">
+          <div class="flex flex-col items-center justify-center border-b border-white/15 px-4 py-5">
+            <span class="mb-1 text-xs font-medium text-slate-300">K-Means Cluster Found</span>
+            <span id="kmeans-clusters-value" class="text-3xl font-bold"></span>
+          </div>
+          <div class="flex flex-col items-center justify-center px-4 py-5">
+            <span class="mb-1 text-xs font-medium text-slate-300">ML Accuracy</span>
+            <span id="ml-accuracy-value" class="text-3xl font-bold"></span>
+          </div>
+        </div>
+        <div class="rounded-2xl bg-white p-5 shadow-sm">
+          <h3 class="mb-3 text-sm font-semibold text-slate-800">Variance Threshold</h3>
+          <p class="whitespace-nowrap text-sm text-slate-600">&lt; 1.8 =&gt; bump</p>
+          <p class="whitespace-nowrap text-sm text-slate-600">&gt; 1.8 slab</p>
+        </div>
+        <div class="rounded-2xl bg-white p-5 shadow-sm">
+          <h3 class="mb-3 text-sm font-semibold text-slate-800">Lifespan Threshold</h3>
+          <p class="whitespace-nowrap text-sm text-slate-600">&lt; 5ms =&gt; SAMM</p>
+          <p class="whitespace-nowrap text-sm text-slate-600">&gt; 1.8 V8 Engine</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="flex flex-col gap-5">
+      <div class="grid grid-cols-[1.3fr_1fr_1fr] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div class="bg-[#0b1428] px-4 py-5 text-white">
+          <p class="mb-2 text-xs font-medium text-slate-300">System Stability Health Score</p>
+          <p class="flex items-baseline gap-1">
+            <span id="health-score-value" class="text-4xl font-bold"></span>
+            <span class="text-sm text-slate-400">/100%</span>
+          </p>
+        </div>
+        <div class="border-l border-slate-200 bg-slate-50 px-4 py-5">
+          <p class="mb-2 text-xs font-medium text-slate-500">System Status</p>
+          <span id="system-status-value" class="text-xl font-semibold text-slate-800"></span>
+        </div>
+        <div class="border-l border-slate-200 bg-slate-50 px-4 py-5">
+          <p class="mb-2 text-xs font-medium text-slate-500">Memory Load</p>
+          <span id="memory-load-value" class="text-xl font-semibold text-slate-800"></span>
+        </div>
+      </div>
+
+      <div class="rounded-2xl bg-white p-5 shadow-sm">
+        <h3 class="mb-3 text-sm font-semibold text-slate-800">Memory Consumption (MB)</h3>
+        <div id="memory-chart" class="w-full h-64"></div>
+      </div>
+      <div class="rounded-2xl bg-white p-5 shadow-sm">
+        <h3 class="mb-3 text-sm font-semibold text-slate-800">Throughput (Requests/sec)</h3>
+        <div id="throughput-chart" class="w-full h-64"></div>
+      </div>
+      <div class="rounded-2xl bg-white p-5 shadow-sm">
+        <h3 class="mb-3 text-sm font-semibold text-slate-800">Latency (ms)</h3>
+        <div id="latency-chart" class="w-full h-64"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="boost-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center bg-black/50">
+    <div class="w-full max-w-md rounded-2xl bg-white p-8 shadow-xl">
+      <div id="modal-stage-list" class="flex flex-col gap-3 text-base text-slate-800">
+        <div>Deriving workload</div>
+        <div>Loading k6</div>
+        <div>Collecting data</div>
+        <div>ML Refinery</div>
+        <div>SAMM Optimization</div>
+        <div>Done ✓</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/mock-data.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/dashboard.js"></script>
+</body>
+</html>
