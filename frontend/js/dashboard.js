@@ -63,7 +63,7 @@ function updateMemoryDensityTracker(data) {
 
   for (let i = 0; i < 24; i++) {
     const block = document.createElement('div');
-    block.style.height = '32px';
+    block.style.height = '128px';
     block.style.flex = '1';
     block.style.borderRadius = '2px';
     if (i < filledCount) {
@@ -83,55 +83,53 @@ function updateArenaSection(data) {
   arenaEl.className = 'flex flex-1 flex-col';
 
   if (!data.arenas || data.arenas.length === 0) {
-    arenaEl.classList.add('items-center', 'justify-center');
-
     const emptyWrap = document.createElement('div');
-    emptyWrap.className = 'flex w-full flex-col items-center justify-center gap-4';
+    emptyWrap.className = 'flex w-full flex-1 flex-col items-center justify-center';
 
     const emptyText = document.createElement('p');
     emptyText.className = 'text-center text-slate-400';
     emptyText.textContent = 'No Arena Found';
 
+    emptyWrap.appendChild(emptyText);
+
     const overflowTag = document.createElement('div');
-    overflowTag.className = 'w-full rounded-full px-4 py-2 text-center text-sm';
-    overflowTag.style.background = 'rgba(255, 255, 255, 0.1)';
-    overflowTag.style.color = '#e2e8f0';
+    overflowTag.className = 'mt-auto w-full rounded-full bg-white px-4 py-2 text-center text-sm font-semibold text-slate-900';
     overflowTag.textContent = 'Arena Overflow Count: N/A';
 
-    emptyWrap.append(emptyText, overflowTag);
-    arenaEl.appendChild(emptyWrap);
+    arenaEl.append(emptyWrap, overflowTag);
     return;
   }
 
   const grid = document.createElement('div');
-  grid.className = 'w-full';
+  grid.className = 'w-full flex-1 mt-4 mb-8';
   grid.style.display = 'grid';
   grid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(140px, 1fr))';
-  grid.style.gap = '12px';
+  grid.style.gap = '16px';
+  grid.style.alignContent = 'start';
 
   data.arenas.forEach((arena) => {
     const card = document.createElement('div');
-    card.className = 'rounded-xl border border-slate-200 bg-white text-slate-800';
-    card.style.padding = '12px';
+    card.className = 'flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white p-6 text-slate-800 shadow-sm text-center';
+    card.style.height = '300px';
 
     const title = document.createElement('p');
-    title.className = 'mb-2 font-bold';
+    title.className = 'mb-1 font-bold text-lg';
     title.textContent = `Arena ${arena.id}`;
 
     const lifespan = document.createElement('p');
-    lifespan.className = 'text-sm';
+    lifespan.className = 'text-sm text-slate-600';
     lifespan.textContent = `Lifespan: ${arena.lifespan_ms}ms`;
 
     const variance = document.createElement('p');
-    variance.className = 'text-sm';
+    variance.className = 'text-sm text-slate-600';
     variance.textContent = `Variance: ${arena.variance}`;
 
     const allocator = document.createElement('p');
-    allocator.className = 'text-sm';
-    allocator.textContent = `${arena.allocator_type} Allocator`;
+    allocator.className = 'text-sm text-slate-600';
+    allocator.textContent = `${arena.allocator_type}`;
 
     const usage = document.createElement('p');
-    usage.className = 'text-sm';
+    usage.className = 'mt-2 text-sm font-bold text-slate-800 bg-slate-100 rounded-md px-3 py-1.5';
     usage.textContent = `${arena.used_mb} / ${arena.total_mb}MB`;
 
     card.append(title, lifespan, variance, allocator, usage);
@@ -139,10 +137,7 @@ function updateArenaSection(data) {
   });
 
   const overflowTag = document.createElement('div');
-  overflowTag.className = 'w-full rounded-full px-4 py-2 text-center text-sm';
-  overflowTag.style.marginTop = '16px';
-  overflowTag.style.background = 'rgba(255, 255, 255, 0.1)';
-  overflowTag.style.color = '#e2e8f0';
+  overflowTag.className = 'mt-auto w-full rounded-full bg-white px-4 py-2 text-center text-sm font-semibold text-slate-900';
   overflowTag.textContent = `Arena Overflow Count: ${data.arena_overflow_count}`;
 
   arenaEl.append(grid, overflowTag);
@@ -163,30 +158,59 @@ function renderDashboard(data) {
   renderCharts(data);
 }
 
-const BOOST_STAGES = ["Deriving workload", "Loading k6", "Collecting data", "ML Refinery", "SAMM Optimization", "Done ✓"];
+const BOOST_STAGES = [
+  "Deriving Workload",
+  "Loading k6",
+  "Collecting Data",
+  "ML Refinery",
+  "SAMM Optimization"
+];
 
 function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getBoostModalEls() {
+  return {
+    modal: document.getElementById('boost-modal'),
+    statusText: document.getElementById('modal-status-text'),
+    spinner: document.getElementById('modal-spinner'),
+    doneBtn: document.getElementById('modal-done-btn'),
+  };
+}
+
+function setBoostModalOpen(open) {
+  const { modal } = getBoostModalEls();
+  if (!modal) return;
+  modal.classList.toggle('is-open', open);
+  modal.classList.toggle('hidden', !open);
+  modal.setAttribute('aria-hidden', open ? 'false' : 'true');
+}
+
+function resetModal() {
+  const { statusText, spinner, doneBtn } = getBoostModalEls();
+  if (statusText) statusText.textContent = '';
+  if (spinner) spinner.classList.remove('hidden');
+  if (doneBtn) doneBtn.classList.add('hidden');
 }
 
 async function onBoostWithSAMM() {
-  const modal = document.getElementById('boost-modal');
-  modal.classList.remove('hidden');
+  const { modal, statusText, spinner, doneBtn } = getBoostModalEls();
+  if (!modal || !statusText || !spinner || !doneBtn) return;
 
-  const stages = Array.from(document.getElementById('modal-stage-list').children);
-  stages.forEach((el) => el.classList.add('stage-item'));
+  resetModal();
+  setBoostModalOpen(true);
 
   for (let i = 0; i < BOOST_STAGES.length; i++) {
-    if (i > 0) {
-      stages[i - 1].classList.remove('active');
-    }
-    stages[i].classList.add('active');
-    await sleep(900);
+    if (i > 0) await sleep(750);
+    statusText.textContent = BOOST_STAGES[i];
   }
 
-  await sleep(500);
-  stages[stages.length - 1].classList.remove('active');
-  modal.classList.add('hidden');
+  await sleep(750);
+  statusText.textContent = 'Complete';
+  spinner.classList.add('hidden');
+  doneBtn.textContent = 'Done';
+  doneBtn.classList.remove('hidden');
 }
 
 renderDashboard(MOCK_DATA.baseline);
@@ -197,3 +221,10 @@ document.getElementById('test-btn').addEventListener('click', () => {
 });
 
 document.getElementById('boost-btn').addEventListener('click', onBoostWithSAMM);
+
+document.getElementById('modal-done-btn').addEventListener('click', () => {
+  setBoostModalOpen(false);
+  currentState = 'samm';
+  renderDashboard(MOCK_DATA.samm);
+  resetModal();
+});

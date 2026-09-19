@@ -69,3 +69,6 @@ Thumbs.db
 *~
 *.swp
 *.swo
+
+# Compiled Frontend CSS Artifacts
+frontend/styles/output.css

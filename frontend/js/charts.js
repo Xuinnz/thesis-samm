@@ -12,7 +12,7 @@ const FILL_RED = "rgba(239, 68, 68, 0.25)";
 function chartSize(el) {
   return {
     width: el.clientWidth || 600,
-    height: el.clientHeight || 256,
+    height: (el.clientHeight || 256) - 40,
   };
 }
 
@@ -55,7 +55,15 @@ function renderMemoryChart(data) {
         y: { min: 0, max: isDual ? 1200 : 1024 },
       },
       axes: [{ label: "Time (seconds)" }, {}],
-      series: seriesOpts(isDual, false),
+      legend: { show: true },
+      series: isDual ? [
+        {},
+        { stroke: STROKE_BLUE, width: 2, label: "SAMM (MB)", value: (u, v) => v == null ? '--' : v.toFixed(1) + ' MB' },
+        { stroke: STROKE_RED, width: 2, label: "V8 Baseline (MB)", value: (u, v) => v == null ? '--' : v.toFixed(1) + ' MB' }
+      ] : [
+        {},
+        { stroke: STROKE_BLUE, width: 2, label: "V8 Baseline (MB)", value: (u, v) => v == null ? '--' : v.toFixed(1) + ' MB' }
+      ],
     },
     chartData,
     el
@@ -85,7 +93,15 @@ function renderThroughputChart(data) {
         y: { min: 0, max: 1500 },
       },
       axes: [{ label: "Time (seconds)" }, {}],
-      series: seriesOpts(isDual, true),
+      legend: { show: true },
+      series: isDual ? [
+        {},
+        { stroke: STROKE_BLUE, width: 2, fill: FILL_BLUE, label: "SAMM (req/s)", value: (u, v) => v == null ? '--' : Math.round(v) + ' req/s' },
+        { stroke: STROKE_RED, width: 2, fill: FILL_RED, label: "V8 Baseline (req/s)", value: (u, v) => v == null ? '--' : Math.round(v) + ' req/s' }
+      ] : [
+        {},
+        { stroke: STROKE_BLUE, width: 2, fill: FILL_BLUE, label: "V8 Baseline (req/s)", value: (u, v) => v == null ? '--' : Math.round(v) + ' req/s' }
+      ],
     },
     chartData,
     el
@@ -115,7 +131,15 @@ function renderLatencyChart(data) {
         y: { min: 0, max: 1200 },
       },
       axes: [{ label: "Time (seconds)" }, {}],
-      series: seriesOpts(isDual, false),
+      legend: { show: true },
+      series: isDual ? [
+        {},
+        { stroke: STROKE_BLUE, width: 2, label: "SAMM (ms)", value: (u, v) => v == null ? '--' : v.toFixed(1) + ' ms' },
+        { stroke: STROKE_RED, width: 2, label: "V8 Baseline (ms)", value: (u, v) => v == null ? '--' : v.toFixed(1) + ' ms' }
+      ] : [
+        {},
+        { stroke: STROKE_BLUE, width: 2, label: "V8 Baseline (ms)", value: (u, v) => v == null ? '--' : v.toFixed(1) + ' ms' }
+      ],
     },
     chartData,
     el
@@ -127,3 +151,21 @@ function renderCharts(data) {
   renderThroughputChart(data);
   renderLatencyChart(data);
 }
+
+const resizeObserver = new ResizeObserver(entries => {
+  for (let entry of entries) {
+    const el = entry.target;
+    const size = chartSize(el);
+    if (el.id === 'memory-chart' && memoryChart) {
+      memoryChart.setSize(size);
+    } else if (el.id === 'throughput-chart' && throughputChart) {
+      throughputChart.setSize(size);
+    } else if (el.id === 'latency-chart' && latencyChart) {
+      latencyChart.setSize(size);
+    }
+  }
+});
+
+resizeObserver.observe(document.getElementById('memory-chart'));
+resizeObserver.observe(document.getElementById('throughput-chart'));
+resizeObserver.observe(document.getElementById('latency-chart'));
