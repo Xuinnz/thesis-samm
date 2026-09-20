@@ -9,6 +9,7 @@
 # Then we will calculate the variance, or how chaotic their lifespan is.
 # Output: Callsite Lifespan, Callsite Lifespan Variance
 import pandas as pd
+import numpy as np
 import os
 import time
 import json
@@ -63,6 +64,131 @@ def aggregate_call_sites():
     # MIN_OBJECTS_PER_CALL_SITE filter below regardless, but guard
     # explicitly so downstream steps never see a NaN sigma2.
     agg['sigma2'] = agg['sigma2'].fillna(0.0)
+
+    # ------------------------------------------------------------------
+    # SPATIAL features: how uniform are this call-site's allocation SIZES?
+    #
+    # Bump-vs-Slab is a question about size, and nothing upstream was
+    # measuring it. A slab hands out fixed-size slots, so a call-site whose
+    # sizes cluster tightly fits one slot with no waste, while a wide
+    # distribution pays twice: rounding up to a class (measured at 47.7% for
+    # the payload-processing call-site on a power-of-two ladder) and, worse,
+    # spreading across many classes -- each of which must be provisioned for
+    # its OWN peak concurrency. Summed per-class peaks are far larger than the
+    # peak of the sum: measured 1,292 MB of slots against 661 MB of live bytes
+    # for the same objects, a 1.95x penalty that no class ladder removes.
+    #
+    # size_cv (std/mean) is scale-free, so one threshold works whether a
+    # call-site allocates kilobytes or megabytes. distinct_sizes is carried
+    # alongside it because a call-site with a handful of exact sizes is
+    # slab-shaped even if those sizes are spread out.
+    size_agg = (
+        df.groupby('call_site_hash')['allocation_size_bytes']
+        .agg(mu_size_bytes='mean', sigma_size_bytes='std',
+             max_size_bytes='max', distinct_sizes='nunique')
+        .reset_index()
+    )
+    size_agg['sigma_size_bytes'] = size_agg['sigma_size_bytes'].fillna(0.0)
+    size_agg['size_cv'] = (size_agg['sigma_size_bytes'] /
+                           size_agg['mu_size_bytes'].replace(0, pd.NA)).fillna(0.0)
+    agg = agg.merge(size_agg, on='call_site_hash', how='left')
+
+    # ------------------------------------------------------------------
+    # STRUCTURE COSTS: what each allocator would waste on this call-site.
+    #
+    # Both are in BYTES and both come straight from how the two structures
+    # work, so the policy step can simply take the cheaper one instead of
+    # comparing features against tuned thresholds.
+    #
+    #   bump_extra = lambda * sigma_occupancy * mean_size
+    #       A bump segment frees only when its LAST object dies, so beyond the
+    #       live set the arena must also absorb whatever arrives during the
+    #       spread in lifetimes. Zero spread costs nothing extra; a long tail
+    #       costs the bytes that arrive while waiting for it.
+    #
+    #   slab_extra = sum over classes(peak_slots * class_size) - peak_live
+    #       Every size class is provisioned for its OWN peak, and those peaks
+    #       do not coincide, so a wide size distribution pays twice: rounding
+    #       each object up to a slot, and reserving each class separately.
+    #
+    # This replaces a median split on lifespan variance (which forced half the
+    # call-sites into each policy regardless of fit) and the two absolute
+    # thresholds that followed it.
+    span_s = (df['allocation_time_ms'].max() - df['allocation_time_ms'].min()) / 1000.0
+    if span_s <= 0:
+        span_s = 1.0
+
+    def _peak_bytes(sub, fixed=None):
+        """Sweep-line maximum of concurrently-live bytes."""
+        size = (sub['allocation_size_bytes'].values.astype(float)
+                if fixed is None else np.full(len(sub), float(fixed)))
+        rel = sub['release_ms'].values
+        ev = np.concatenate([
+            np.stack([sub['allocation_time_ms'].values, size]),
+            np.stack([rel, -size])], axis=1)
+        ev = ev[:, np.argsort(ev[0], kind='stable')]
+        return float(np.max(np.cumsum(ev[1]))) if len(sub) else 0.0
+
+    def _pow2(x):
+        c = 64
+        while c < x:
+            c *= 2
+        return c
+
+    # A managed object's slot is released at scope end; an escaping one not
+    # until collection. Take whichever comes first.
+    if 'scope_end_ms' in df.columns:
+        df['release_ms'] = df[['scope_end_ms', 'finalization_time_ms']].min(axis=1)
+    else:
+        df['release_ms'] = df['finalization_time_ms']
+
+    rows = []
+    for h, g in df.groupby('call_site_hash'):
+        peak_live = _peak_bytes(g)
+        lam = len(g) / span_s
+        sigma_occ_s = ((g['scope_end_ms'] - g['allocation_time_ms']).clip(lower=0).std()
+                       if 'scope_end_ms' in g.columns else g['lifespan_ms'].std()) / 1000.0
+        if sigma_occ_s != sigma_occ_s:
+            sigma_occ_s = 0.0
+        bump_extra = lam * sigma_occ_s * g['allocation_size_bytes'].mean()
+        classed = g.assign(_cls=[_pow2(int(v)) for v in g['allocation_size_bytes']])
+        slab_reserved = sum(_peak_bytes(sub, cls) for cls, sub in classed.groupby('_cls'))
+        rows.append({'call_site_hash': h,
+                     'peak_live_bytes': peak_live,
+                     'bump_extra_bytes': max(0.0, bump_extra),
+                     'slab_extra_bytes': max(0.0, slab_reserved - peak_live)})
+    agg = agg.merge(pd.DataFrame(rows), on='call_site_hash', how='left')
+
+    # ------------------------------------------------------------------
+    # TEMPORAL feature, corrected: how long an object holds its ARENA SLOT.
+    #
+    # sigma2 above is the variance of GC-observed lifespan (allocation ->
+    # finalization). Under region-per-request reclamation that is the wrong
+    # clock: a managed object's slot is released at scope end by the region,
+    # not by the garbage collector, so finalization lag is noise on top of the
+    # quantity that actually decides arena pinning.
+    #
+    # The two agree closely wherever a route awaits -- hold time dominates, and
+    # sigma2 matched sigma2_occupancy to four significant figures for both
+    # holding call-sites. They diverge exactly where it matters: for routes
+    # that never await, sigma2 reported 200-280 (pure collector jitter) while
+    # the true slot occupancy variance is 0-2. Pinning risk is a property of
+    # the request, not of when V8 got around to noticing.
+    if 'scope_end_ms' in df.columns:
+        occ = df['scope_end_ms'] - df['allocation_time_ms']
+        occ_agg = (
+            df.assign(occupancy_ms=occ.clip(lower=0))
+            .groupby('call_site_hash')['occupancy_ms']
+            .agg(mu_occupancy='mean', sigma2_occupancy='var')
+            .reset_index()
+        )
+        occ_agg['sigma2_occupancy'] = occ_agg['sigma2_occupancy'].fillna(0.0)
+        agg = agg.merge(occ_agg, on='call_site_hash', how='left')
+    else:
+        print("WARNING: no scope_end_ms; falling back to GC lifespan variance "
+              "for the pinning feature.")
+        agg['mu_occupancy'] = agg['mu_lifespan']
+        agg['sigma2_occupancy'] = agg['sigma2']
 
     # Scope-relative features, carried through to the clustering step.
     #
