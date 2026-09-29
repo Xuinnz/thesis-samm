@@ -1,0 +1,17 @@
+{
+  "name": "samm-enabled-server",
+  "version": "1.0.0",
+  "description": "Experimental-group microservice routing managed allocations through the Zig sidecar allocator (SAMM thesis benchmarking)",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "SAMM_ALLOCATOR_ENABLED=true node server.js",
+    "start:profiled": "SAMM_ALLOCATOR_ENABLED=true SHADOW_PROFILER_ENABLED=true node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
