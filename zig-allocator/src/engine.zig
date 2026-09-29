@@ -162,13 +162,13 @@ pub const Engine = struct {
                 const bytes = arena.alloc(size) orelse return null;
                 return .{
                     .bytes = bytes,
-                    .handle = packBump(decision.arena_index, arena.currentSegment),
+                    .handle = packBump(decision.arena_index, arena.currentSegment()),
                 };
             },
 
             //if slab, we just need the class index and slot index.
             .slab => {
-                const reservation = self.slab.alloc(size) orelse null;
+                const reservation = self.slab.alloc(size) orelse return null;
                 return .{
                     .bytes = reservation.bytes,
                     .handle = packSlab(reservation.class_index, reservation.slot_index),
@@ -189,7 +189,7 @@ pub const Engine = struct {
         if (handle & handle_slab != 0) {
             self.slab.free(index, tail);
         } else { // if bump, we use the release function of bump
-            self.bump_arena[index].release(tail);
+            self.bump_arenas[index].release(tail);
         }
     }
 

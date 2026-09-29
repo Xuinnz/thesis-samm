@@ -52,6 +52,7 @@ pub const Arena = struct {
             .pool = p,
             .budget = b,
             .offset = spec.offset,
+            .floor = spec.floor_bytes,
             .span = spec.span_bytes,
             .segment_bytes = spec.segment_bytes,
             .max_segments = spec.max_segments,
