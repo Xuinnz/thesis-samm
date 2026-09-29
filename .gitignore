@@ -72,3 +72,7 @@ Thumbs.db
 
 # Compiled Frontend CSS Artifacts
 frontend/styles/output.css
+
+benchmark-results/
+recordings/
+results/
