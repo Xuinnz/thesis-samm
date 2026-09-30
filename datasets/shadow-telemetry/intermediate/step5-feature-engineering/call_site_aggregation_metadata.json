@@ -1,0 +1,7 @@
+{
+    "min_objects_per_call_site_threshold": 30,
+    "call_sites_before_filtering": 6,
+    "call_sites_after_filtering": 6,
+    "call_sites_dropped": 0,
+    "dropped_call_sites": []
+}

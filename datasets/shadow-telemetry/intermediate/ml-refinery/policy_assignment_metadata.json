@@ -1,0 +1,11 @@
+{
+    "system_cluster_id": 2,
+    "system_rank_feature": "overhang_log",
+    "decision_rule": "minimum-waste",
+    "non_system_call_site_count": 5,
+    "policy_counts": {
+        "Bump": 4,
+        "Slab": 1,
+        "System": 1
+    }
+}

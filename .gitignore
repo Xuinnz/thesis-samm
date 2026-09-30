@@ -1,11 +1,26 @@
 
 
 # Ignore all large CSVs and data traces, but keep the directories
-datasets/**/*.csv
-datasets/**/*.dat
-datasets/**/*.gz
-datasets/**/*.json
-datasets/**/*.parquet
+datasets/azure-trace-2019/raw
+datasets/azure-trace-2019/intermediate
+datasets/rps-sweep-results
+
+# Raw characterization traces (hundreds of MB, rewritten by every
+# characterization run). The workload manifest stays: it records which workload
+# the committed routing table was trained on, and the demo reads it.
+datasets/shadow-telemetry/raw/*
+!datasets/shadow-telemetry/raw/workload_manifest.json
+
+# Per-allocation intermediates from preprocessing steps 4-5 (490 MB and 913 MB,
+# over GitHub's 100 MB limit). Preprocessing regenerates them from the raw
+# trace; the per-call-site summaries beside them are kept.
+datasets/shadow-telemetry/intermediate/step4-missing-value-handling/training_trace_censoring_removed.csv
+datasets/shadow-telemetry/intermediate/step5-feature-engineering/training_trace_with_lifespan.csv
+
+# Preprocessing byproduct. k6 and the server read only its summary,
+# jitter_parameters.json.
+datasets/azure-trace-2019/processed/traffic-models/jitter_per_function.csv
+
 *.log
 
 # Python (ML Refinery, Preprocessing, Stats Eval)

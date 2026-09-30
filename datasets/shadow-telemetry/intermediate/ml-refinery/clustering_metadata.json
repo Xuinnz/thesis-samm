@@ -1,0 +1,27 @@
+{
+    "random_state": 42,
+    "k_evaluated": [
+        1,
+        2,
+        3,
+        4,
+        5
+    ],
+    "wcss": [
+        14.602825771044303,
+        0.43444584230662275,
+        0.0311758562314029,
+        0.0010255095601679727,
+        0.0
+    ],
+    "second_derivatives": {
+        "2": 13.76510994266246,
+        "3": 0.37311963940398496,
+        "4": 0.029124837111066955
+    },
+    "selected_k": 3,
+    "clustering_feature": "overhang_log",
+    "elbow_k": 2,
+    "min_temporal_strata": 3,
+    "k_source": "elbow"
+}

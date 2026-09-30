@@ -1,0 +1,144 @@
+{
+    "container_ceiling_bytes": 1073741824,
+    "node_v8_baseline_bytes": 83886080,
+    "floor_quantile": 0.9,
+    "system_high_watermark_bytes": 69206016,
+    "system_reservation_bytes": 79586918,
+    "general_safety_margin_bytes": 33554432,
+    "pool_hard_limit_bytes": 876714394,
+    "beta_utilization_fraction": 0.75,
+    "m_available_bytes": 657535795.5,
+    "slab_classes": [
+        64,
+        128,
+        256,
+        512,
+        1024,
+        2048,
+        4096,
+        8192,
+        16384,
+        32768,
+        65536,
+        131072,
+        262144,
+        524288,
+        1048576
+    ],
+    "strata_quotas": {
+        "bump:6032067261616903543": {
+            "P_j_bytes": 425496889,
+            "Q_j_bytes": 350001252,
+            "F_j_bytes": 301125609,
+            "max_alloc_bytes": 16777216
+        },
+        "bump:7788200244258950291": {
+            "P_j_bytes": 24081903,
+            "Q_j_bytes": 19809066,
+            "F_j_bytes": 16740015,
+            "max_alloc_bytes": 1048561
+        },
+        "bump:8985841585374529601": {
+            "P_j_bytes": 20480,
+            "Q_j_bytes": 16846,
+            "F_j_bytes": 4096,
+            "max_alloc_bytes": 4096
+        },
+        "bump:10594155676959940577": {
+            "P_j_bytes": 31000579,
+            "Q_j_bytes": 25500166,
+            "F_j_bytes": 8493201,
+            "max_alloc_bytes": 32767
+        },
+        "slab:64": {
+            "P_j_bytes": 0,
+            "Q_j_bytes": 0,
+            "F_j_bytes": 0,
+            "max_alloc_bytes": 0
+        },
+        "slab:128": {
+            "P_j_bytes": 0,
+            "Q_j_bytes": 0,
+            "F_j_bytes": 0,
+            "max_alloc_bytes": 0
+        },
+        "slab:256": {
+            "P_j_bytes": 0,
+            "Q_j_bytes": 0,
+            "F_j_bytes": 0,
+            "max_alloc_bytes": 0
+        },
+        "slab:512": {
+            "P_j_bytes": 0,
+            "Q_j_bytes": 0,
+            "F_j_bytes": 0,
+            "max_alloc_bytes": 0
+        },
+        "slab:1024": {
+            "P_j_bytes": 0,
+            "Q_j_bytes": 0,
+            "F_j_bytes": 0,
+            "max_alloc_bytes": 0
+        },
+        "slab:2048": {
+            "P_j_bytes": 0,
+            "Q_j_bytes": 0,
+            "F_j_bytes": 0,
+            "max_alloc_bytes": 0
+        },
+        "slab:4096": {
+            "P_j_bytes": 0,
+            "Q_j_bytes": 0,
+            "F_j_bytes": 0,
+            "max_alloc_bytes": 0
+        },
+        "slab:8192": {
+            "P_j_bytes": 0,
+            "Q_j_bytes": 0,
+            "F_j_bytes": 0,
+            "max_alloc_bytes": 0
+        },
+        "slab:16384": {
+            "P_j_bytes": 0,
+            "Q_j_bytes": 0,
+            "F_j_bytes": 0,
+            "max_alloc_bytes": 0
+        },
+        "slab:32768": {
+            "P_j_bytes": 0,
+            "Q_j_bytes": 0,
+            "F_j_bytes": 0,
+            "max_alloc_bytes": 0
+        },
+        "slab:65536": {
+            "P_j_bytes": 0,
+            "Q_j_bytes": 0,
+            "F_j_bytes": 0,
+            "max_alloc_bytes": 0
+        },
+        "slab:131072": {
+            "P_j_bytes": 0,
+            "Q_j_bytes": 0,
+            "F_j_bytes": 0,
+            "max_alloc_bytes": 0
+        },
+        "slab:262144": {
+            "P_j_bytes": 0,
+            "Q_j_bytes": 0,
+            "F_j_bytes": 0,
+            "max_alloc_bytes": 0
+        },
+        "slab:524288": {
+            "P_j_bytes": 0,
+            "Q_j_bytes": 0,
+            "F_j_bytes": 0,
+            "max_alloc_bytes": 0
+        },
+        "slab:1048576": {
+            "P_j_bytes": 318767104,
+            "Q_j_bytes": 262208463,
+            "F_j_bytes": 261095424,
+            "max_alloc_bytes": 0
+        }
+    }
+}
