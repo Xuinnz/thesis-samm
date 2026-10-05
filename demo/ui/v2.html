@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<!-- Alternative layout: the three headline metrics on one screen.
+
+     Same scripts, same state, same element ids as index.html -- only the
+     arrangement differs, so either file can be deleted without touching the
+     JavaScript. Panels that exist on only one layout are skipped by the
+     renderer rather than throwing.
+
+     Zone 1 (no scrolling): mode, the three metrics as numbers, the three
+     charts side by side, and the supporting counters.
+     Zone 2 (scroll): the routing table, the ML rules and the allocator. -->
+<html lang="en" class="scroll-smooth">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SAMM Dashboard</title>
+  <link rel="stylesheet" href="styles/output.css">
+  <script src="vendor/uPlot.iife.min.js"></script>
+  <link rel="stylesheet" href="vendor/uPlot.min.css">
+</head>
+
+<body class="min-h-screen min-w-[1440px] bg-[#e8edf4] text-slate-900 antialiased">
+  <!-- Header + zone 1 fill the first viewport so ML validation starts below the fold. -->
+  <div class="flex min-h-screen flex-col">
+  <header class="sticky top-0 z-40 flex w-full flex-nowrap items-center justify-between bg-white px-8 py-2 shadow-sm">
+    <div class="flex shrink-0 items-center gap-4">
+      <img src="design/Logo.svg" alt="SAMM Logo" class="h-10 w-auto object-contain">
+      <div class="flex flex-col gap-0.5">
+        <span id="mode-badge" class="w-fit rounded-full px-3 py-1 text-xs font-bold tracking-wide">—</span>
+        <span class="flex items-center gap-2 text-xs text-slate-500">
+          <span id="link-dot" class="inline-block h-2 w-2 rounded-full bg-slate-300"></span>
+          <span id="link-text">connecting…</span>
+        </span>
+      </div>
+      <a href="#ml-validation" id="ml-summary"
+        class="ml-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-200">routing table ↓</a>
+    </div>
+    <div class="flex shrink-0 items-center gap-3">
+      <span id="run-pill" class="hidden whitespace-nowrap rounded-full bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700"></span>
+      <button id="test-btn" type="button"
+        class="whitespace-nowrap rounded-full border-2 border-slate-900 bg-white px-5 py-2 text-sm font-semibold text-slate-900 disabled:cursor-not-allowed disabled:opacity-40">Test
+        with K6</button>
+      <button id="boost-btn" type="button"
+        class="whitespace-nowrap rounded-full bg-[#0b1428] px-5 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">Boost
+        with SAMM</button>
+      <!-- SAMM only: pre-fault the floors at container start. Hidden in
+           baseline mode, which has nothing to warm. -->
+      <span id="warmup-group" class="hidden items-center gap-2">
+        <button id="warmup-btn" type="button"
+          title="Pre-fault SAMM's arena floors when the container starts. Removes first-touch page faults from the run, at the cost of RSS starting at the full floor size before any traffic. Restarts the SAMM container."
+          class="whitespace-nowrap rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">Warmup: off</button>
+        <span id="warmup-note" class="whitespace-nowrap text-[11px] text-slate-500"></span>
+      </span>
+      <button id="history-btn" type="button"
+        class="whitespace-nowrap rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700">History</button>
+      <button id="help-btn" type="button"
+        class="whitespace-nowrap text-sm text-slate-500 underline-offset-2 hover:underline">Need Help?</button>
+      <a href="index.html" class="whitespace-nowrap text-xs text-slate-400 underline-offset-2 hover:underline">classic layout</a>
+    </div>
+  </header>
+
+  <!-- ===================================================== zone 1: one screen -->
+  <div class="flex min-h-0 flex-1 flex-col gap-4 px-8 py-4">
+    <!-- the three headline metrics, plus how the system is doing -->
+    <section id="hero-strip" class="grid grid-cols-[repeat(3,minmax(0,1fr))_minmax(0,0.9fr)] gap-4">
+      <div class="rounded-2xl bg-white p-4 shadow-sm">
+        <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <span class="metric-title group relative cursor-default outline-none" tabindex="0">Throughput
+            <span class="metric-tip pointer-events-none invisible absolute top-full left-0 z-50 mt-1 rounded-md bg-[#0b1428] text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Requests handled per second. Higher is better.</span>
+          </span>
+        </p>
+        <p class="mt-1 flex items-baseline gap-2">
+          <span id="hero-rps" class="text-5xl font-bold tabular-nums text-[#0b1428]">—</span>
+          <span class="text-sm text-slate-500">req/s</span>
+        </p>
+        <p id="hero-rps-prev" class="mt-1 text-xs text-slate-400">—</p>
+      </div>
+
+      <div class="rounded-2xl bg-white p-4 shadow-sm">
+        <p class="flex items-baseline justify-between text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <span class="metric-title group relative cursor-default outline-none" tabindex="0">Latency p95
+            <span class="metric-tip pointer-events-none invisible absolute top-full left-0 z-50 mt-1 rounded-md bg-[#0b1428] text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Response time that 95% of requests beat. Lower is better.</span>
+          </span>
+          <span id="hero-p95-source" class="normal-case font-normal tracking-normal text-slate-400"></span>
+        </p>
+        <p class="mt-1 flex items-baseline gap-2">
+          <span id="hero-p95" class="text-5xl font-bold tabular-nums text-[#0b1428]">—</span>
+          <span class="text-sm text-slate-500">ms</span>
+        </p>
+        <p id="hero-p95-prev" class="mt-1 text-xs text-slate-400">—</p>
+      </div>
+
+      <div class="rounded-2xl bg-white p-4 shadow-sm">
+        <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <span class="metric-title group relative cursor-default outline-none" tabindex="0">Memory (RSS)
+            <span class="metric-tip pointer-events-none invisible absolute top-full left-0 z-50 mt-1 rounded-md bg-[#0b1428] text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Physical memory the process currently holds, against the container limit.</span>
+          </span>
+        </p>
+        <p class="mt-1 flex items-baseline gap-2">
+          <span id="hero-rss" class="text-5xl font-bold tabular-nums text-[#0b1428]">—</span>
+          <span id="hero-rss-limit" class="text-sm text-slate-500">of 1024 MB</span>
+        </p>
+        <!-- the density tracker, reduced to the one line it needs -->
+        <div class="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-200">
+          <div id="hero-rss-bar" class="h-full w-0 rounded-full bg-[#0b1428]"></div>
+        </div>
+        <p id="hero-rss-prev" class="mt-1 text-xs text-slate-400">—</p>
+      </div>
+
+      <div class="flex flex-col justify-between rounded-2xl bg-[#0b1428] p-4 text-white">
+        <p class="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-slate-300">
+          <span class="metric-title group relative cursor-default outline-none" tabindex="0">Health
+            <span class="metric-tip pointer-events-none invisible absolute top-full right-0 z-50 mt-1 rounded-md bg-slate-800 text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Overall stability score (0-100) based on memory pressure, errors, and failures.</span>
+          </span>
+          <button id="health-info" type="button"
+            class="rounded-full border border-slate-500 px-1.5 text-[10px] leading-4 text-slate-300 hover:bg-white/10">i</button>
+        </p>
+        <p class="flex items-baseline gap-1">
+          <span id="health-score-value" class="text-4xl font-bold tabular-nums">—</span>
+          <span class="text-xs text-slate-400">/100</span>
+        </p>
+        <p class="flex items-center justify-between text-xs">
+          <span id="system-status-value" class="font-semibold">—</span>
+          <span id="memory-load-value" class="text-slate-400">—</span>
+        </p>
+      </div>
+    </section>
+
+    <!-- the three charts, side by side, sized to the leftover viewport -->
+    <section class="grid min-h-0 flex-1 grid-cols-3 gap-4">
+      <div class="flex h-full min-h-0 flex-col rounded-2xl bg-white p-4 shadow-sm">
+        <h3 class="mb-2 text-sm font-semibold text-slate-800">Throughput (req/s)</h3>
+        <div id="throughput-chart" class="min-h-[200px] w-full flex-1"></div>
+      </div>
+      <div class="flex h-full min-h-0 flex-col rounded-2xl bg-white p-4 shadow-sm">
+        <h3 class="mb-2 text-sm font-semibold text-slate-800">Latency p95 (ms)
+          <span id="latency-note" class="font-normal text-slate-400">— cumulative since the run began</span>
+        </h3>
+        <div id="latency-chart" class="min-h-[200px] w-full flex-1"></div>
+      </div>
+      <div class="flex h-full min-h-0 flex-col rounded-2xl bg-white p-4 shadow-sm">
+        <div class="mb-2 flex items-baseline justify-between">
+          <h3 class="text-sm font-semibold text-slate-800">Memory RSS (MB)</h3>
+          <span id="ghost-note" class="text-[11px] text-slate-400"></span>
+        </div>
+        <div id="memory-chart" class="min-h-[200px] w-full flex-1"></div>
+      </div>
+    </section>
+
+    <!-- supporting counters -->
+    <section class="grid grid-cols-5 gap-3">
+      <div class="rounded-2xl bg-white p-3 shadow-sm">
+        <p class="text-xs font-medium text-slate-500">
+          <span class="metric-title group relative cursor-default outline-none" tabindex="0">Page Faults / s
+            <span class="metric-tip pointer-events-none invisible absolute top-full left-0 z-50 mt-1 rounded-md bg-[#0b1428] text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Memory pages loaded from disk per second. Lower means less memory pressure.</span>
+          </span>
+        </p>
+        <p id="kpi-faults" class="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">—</p>
+        <p id="kpi-faults-req" class="text-xs text-slate-500">—</p>
+      </div>
+      <div class="rounded-2xl bg-white p-3 shadow-sm">
+        <p class="text-xs font-medium text-slate-500">
+          <span class="metric-title group relative cursor-default outline-none" tabindex="0">CPU
+            <span class="metric-tip pointer-events-none invisible absolute top-full left-0 z-50 mt-1 rounded-md bg-[#0b1428] text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Container CPU usage, and how much of it was throttled.</span>
+          </span>
+        </p>
+        <p id="kpi-cpu" class="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">—</p>
+        <p id="kpi-throttle" class="text-xs text-slate-500">—</p>
+      </div>
+      <div class="rounded-2xl bg-white p-3 shadow-sm">
+        <p class="text-xs font-medium text-slate-500">
+          <span class="metric-title group relative cursor-default outline-none" tabindex="0">Dropped (run so far)
+            <span class="metric-tip pointer-events-none invisible absolute top-full left-0 z-50 mt-1 rounded-md bg-[#0b1428] text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Requests that were dropped or failed during the run.</span>
+          </span>
+        </p>
+        <p id="kpi-dropped" class="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">—</p>
+        <p id="kpi-failed" class="text-xs text-slate-500">—</p>
+      </div>
+      <div class="rounded-2xl bg-white p-3 shadow-sm">
+        <p class="text-xs font-medium text-slate-500">
+          <span class="metric-title group relative cursor-default outline-none" tabindex="0">Peak RSS
+            <span class="metric-tip pointer-events-none invisible absolute top-full left-0 z-50 mt-1 rounded-md bg-[#0b1428] text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Highest memory usage reached during the run.</span>
+          </span>
+        </p>
+        <p id="kpi-peak" class="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">—</p>
+        <p id="kpi-oom" class="text-xs text-slate-500">—</p>
+      </div>
+      <div class="rounded-2xl bg-white p-3 shadow-sm">
+        <p class="text-xs font-medium text-slate-500">
+          <span class="metric-title group relative cursor-default outline-none" tabindex="0">Fallback Rate
+            <span class="metric-tip pointer-events-none invisible absolute top-full right-0 z-50 mt-1 rounded-md bg-[#0b1428] text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Share of allocations that fell back to the system allocator instead of SAMM's arenas.</span>
+          </span>
+        </p>
+        <p id="fallback-rate-value" class="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">—</p>
+        <p id="fallback-note" class="text-xs text-slate-500">—</p>
+      </div>
+    </section>
+  </div>
+  </div>
+
+  <main class="flex flex-col gap-4 px-8 py-4">
+    <!-- ================================================== zone 2: the detail -->
+    <!-- Evidence for each ML layer. There is no single "accuracy %": none of the
+         three layers has labelled ground truth, so each is judged by the kind
+         of decision it makes -- a classifier by its separation, an optimiser by
+         its margin, a capacity prediction by how often it fell short. -->
+    <section id="ml-validation" class="mt-2 flex flex-col gap-3 scroll-mt-20">
+      <div class="flex items-baseline justify-between">
+        <h2 class="text-lg font-bold text-[#0b1428]">ML validation</h2>
+        <p class="text-xs text-slate-500">evidence per layer — no single accuracy %, because none of the layers has labelled ground truth</p>
+      </div>
+      <div class="grid grid-cols-3 gap-4">
+        <!-- Layer 1 -->
+        <div class="flex flex-col rounded-2xl bg-white p-5 shadow-sm">
+          <div class="flex items-center justify-between">
+            <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Layer 1 · Escape detection</p>
+            <span id="val1-chip" class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500">—</span>
+          </div>
+          <p class="text-[11px] text-slate-400">k-means on scope overhang · decides what goes to System</p>
+          <p class="mt-3 flex items-baseline gap-2">
+            <span id="val1-big" class="text-4xl font-bold tabular-nums text-[#0b1428]">—</span>
+            <span class="text-sm text-slate-500">separation</span>
+          </p>
+          <p id="val1-caption" class="text-xs text-slate-500">—</p>
+          <div id="val1-rows" class="mt-3 flex flex-col text-xs"></div>
+        </div>
+
+        <!-- Layer 2 -->
+        <div class="flex flex-col rounded-2xl bg-white p-5 shadow-sm">
+          <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Layer 2 · Structure choice</p>
+          <p class="text-[11px] text-slate-400">minimum waste · decides bump or slab per call site</p>
+          <p class="mt-3 flex items-baseline gap-2">
+            <span id="val2-big" class="text-4xl font-bold tabular-nums text-[#0b1428]">—</span>
+            <span class="text-sm text-slate-500">closest margin</span>
+          </p>
+          <p id="val2-caption" class="text-xs text-slate-500">—</p>
+          <div id="val2-rows" class="mt-3 flex flex-col text-xs"></div>
+          <p id="val2-saved" class="mt-auto pt-2 text-[11px] text-slate-400"></p>
+        </div>
+
+        <!-- Layer 3 -->
+        <div class="flex flex-col rounded-2xl bg-white p-5 shadow-sm">
+          <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Layer 3 · Spatial quotas</p>
+          <p class="text-[11px] text-slate-400">capacity per arena · judged by how often it fell short</p>
+          <p class="mt-3 flex items-baseline gap-2">
+            <span id="val3-big" class="text-4xl font-bold tabular-nums text-[#0b1428]">—</span>
+            <span class="text-sm text-slate-500">coverage</span>
+          </p>
+          <p id="val3-caption" class="text-xs text-slate-500">—</p>
+          <div id="val3-rows" class="mt-3 flex flex-col text-xs"></div>
+          <div id="val3-bar" class="mt-2 flex h-2 w-full overflow-hidden rounded-full bg-slate-100"></div>
+          <div id="val3-legend" class="mt-1 flex flex-wrap gap-x-3 text-[10px] text-slate-500"></div>
+          <p id="val3-caveat" class="mt-auto pt-2 text-[11px] text-slate-400"></p>
+        </div>
+      </div>
+    </section>
+
+    <section id="detail" class="mt-2 grid grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-4 scroll-mt-20">
+      <div class="flex flex-col rounded-2xl bg-[#0b1428] p-5 text-white">
+        <div class="mb-3 flex items-center justify-between">
+          <h2 class="text-lg font-semibold">Arena</h2>
+          <span id="arena-subtitle" class="text-xs text-slate-400">capacity from the routing table</span>
+        </div>
+        <div id="arena-content" class="flex flex-1 flex-col"></div>
+      </div>
+
+      <div class="flex flex-col gap-4">
+        <div class="grid grid-cols-2 gap-4">
+          <div class="flex flex-col items-center justify-center rounded-2xl bg-[#0b1428] p-4 text-white">
+            <span class="mb-1 text-center text-xs font-medium text-slate-300">K-Means Clusters Found</span>
+            <span id="kmeans-clusters-value" class="text-4xl font-bold">—</span>
+            <span id="kmeans-note" class="mt-1 text-center text-xs text-slate-400"></span>
+          </div>
+          <div class="rounded-2xl bg-white p-4 shadow-sm">
+            <h3 class="mb-1 text-center text-sm font-bold text-slate-800">Arena Choice</h3>
+            <p class="mb-2 text-center text-[11px] text-slate-500">whichever wastes fewer bytes wins</p>
+            <div id="policy-rule-body" class="flex flex-col gap-1 text-[11px]"></div>
+          </div>
+        </div>
+        <div class="rounded-2xl bg-white p-4 shadow-sm">
+          <h3 class="mb-1 text-center text-sm font-bold text-slate-800">Escape Detection</h3>
+          <p class="mb-2 text-center text-[11px] text-slate-500">k-means on scope overhang</p>
+          <div id="escape-rule-body" class="flex flex-col gap-1 text-[11px]"></div>
+        </div>
+        <div class="rounded-2xl bg-white p-4 shadow-sm">
+          <h3 class="mb-2 text-sm font-semibold text-slate-800">Allocator</h3>
+          <div id="allocator-body" class="grid grid-cols-2 gap-x-5 gap-y-1 text-xs"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ====================================================== run config -->
+  <div id="run-modal" class="boost-modal hidden" aria-hidden="true">
+    <div class="boost-modal-card">
+      <h2 class="boost-modal-title">Run a k6 load test</h2>
+      <form id="run-form" class="samm-form">
+        <label class="samm-field">
+          <span>Load point (k)</span>
+          <select id="run-k" name="k"></select>
+          <small id="run-k-note">arrival rate scales by k, every hold by 1/k</small>
+        </label>
+        <label class="samm-field">
+          <span>Schedule seed</span>
+          <input id="run-seed" name="seed" type="number" min="0" step="1">
+          <small>same seed = same request stream on both machines</small>
+        </label>
+        <label class="samm-field">
+          <span>Minutes</span>
+          <input id="run-minutes" name="minutes" type="number" min="1" max="60" step="1">
+          <small>3 is a demo; the study uses 10</small>
+        </label>
+        <p id="run-error" class="samm-error hidden"></p>
+        <div class="samm-actions">
+          <button type="button" id="run-cancel" class="samm-btn-ghost">Cancel</button>
+          <button type="submit" id="run-start" class="samm-btn">Start run</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===================================================== stage popup -->
+  <div id="boost-modal" class="boost-modal hidden" aria-hidden="true">
+    <div class="boost-modal-card">
+      <h2 id="modal-title" class="boost-modal-title">Switching allocator</h2>
+      <div id="modal-spinner" class="boost-modal-spinner">
+        <div class="boost-spinner-ring"></div>
+      </div>
+      <p id="modal-status-text" class="boost-modal-status"></p>
+      <ul id="modal-stage-list" class="samm-stage-list"></ul>
+      <button id="modal-done-btn" type="button" class="boost-modal-done hidden">Done</button>
+    </div>
+  </div>
+
+  <!-- ==================================================== run summary -->
+  <div id="final-modal" class="boost-modal hidden" aria-hidden="true">
+    <div class="boost-modal-card">
+      <h2 class="boost-modal-title">Run complete</h2>
+      <div id="final-body" class="samm-summary"></div>
+      <button id="final-close" type="button" class="boost-modal-done">Close</button>
+    </div>
+  </div>
+
+  <!-- =================================================== container died -->
+  <div id="death-modal" class="boost-modal hidden" aria-hidden="true">
+    <div class="boost-modal-card">
+      <h2 id="death-title" class="boost-modal-title">Container died</h2>
+      <p id="death-reason" class="boost-modal-status"></p>
+      <div id="death-body" class="samm-summary"></div>
+      <button id="death-close" type="button" class="boost-modal-done">Close</button>
+    </div>
+  </div>
+
+  <!-- ======================================================== history -->
+  <div id="history-modal" class="boost-modal hidden" aria-hidden="true">
+    <div class="boost-modal-card samm-help-card">
+      <h2 class="boost-modal-title">Run history</h2>
+      <p class="boost-modal-status">Every completed run on this machine. Pick one to draw it as the reference line.</p>
+      <div id="history-body" class="samm-history"></div>
+      <button id="history-close" type="button" class="boost-modal-done">Close</button>
+    </div>
+  </div>
+
+  <!-- ========================================================== help -->
+  <div id="help-modal" class="boost-modal hidden" aria-hidden="true">
+    <div class="boost-modal-card samm-help-card">
+      <h2 class="boost-modal-title">What the numbers mean</h2>
+      <div id="help-body" class="samm-help"></div>
+      <button id="help-close" type="button" class="boost-modal-done">Close</button>
+    </div>
+  </div>
+
+  <script src="js/live.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/dashboard.js"></script>
+</body>
+
+</html>
