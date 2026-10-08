@@ -66,6 +66,11 @@ function renderHeader(live) {
     group.classList.toggle('hidden', !isSamm);
     group.classList.toggle('flex', isSamm);
   });
+  // Display-only: hide ML validation numbers until SAMM. Data still renders underneath.
+  on('ml-validation', (el) => {
+    if (isSamm) el.setAttribute('data-mode', 'samm');
+    else el.removeAttribute('data-mode');
+  });
   const warm = Boolean(live.status && live.status.warmup);
   on('warmup-btn', (btn) => {
     btn.textContent = `Warmup: ${warm ? 'on' : 'off'}`;

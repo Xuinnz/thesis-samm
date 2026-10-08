@@ -21,6 +21,8 @@
 </head>
 
 <body class="min-h-screen min-w-[1440px] bg-[#e8edf4] text-slate-900 antialiased">
+  <!-- Header + zone 1 fill the first viewport so ML validation starts below the fold. -->
+  <div class="flex min-h-screen flex-col">
   <header class="sticky top-0 z-40 flex w-full flex-nowrap items-center justify-between bg-white px-8 py-2 shadow-sm">
     <div class="flex shrink-0 items-center gap-4">
       <img src="design/Logo.svg" alt="SAMM Logo" class="h-10 w-auto object-contain">
@@ -59,11 +61,15 @@
   </header>
 
   <!-- ===================================================== zone 1: one screen -->
-  <main class="flex flex-col gap-4 px-8 py-4">
+  <div class="flex min-h-0 flex-1 flex-col gap-4 px-8 py-4">
     <!-- the three headline metrics, plus how the system is doing -->
     <section id="hero-strip" class="grid grid-cols-[repeat(3,minmax(0,1fr))_minmax(0,0.9fr)] gap-4">
       <div class="rounded-2xl bg-white p-4 shadow-sm">
-        <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Throughput</p>
+        <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <span class="metric-title group relative cursor-default outline-none" tabindex="0">Throughput
+            <span class="metric-tip pointer-events-none invisible absolute top-full left-0 z-50 mt-1 rounded-md bg-[#0b1428] text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Requests handled per second. Higher is better.</span>
+          </span>
+        </p>
         <p class="mt-1 flex items-baseline gap-2">
           <span id="hero-rps" class="text-5xl font-bold tabular-nums text-[#0b1428]">—</span>
           <span class="text-sm text-slate-500">req/s</span>
@@ -73,7 +79,10 @@
 
       <div class="rounded-2xl bg-white p-4 shadow-sm">
         <p class="flex items-baseline justify-between text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Latency p95 <span id="hero-p95-source" class="normal-case font-normal tracking-normal text-slate-400"></span>
+          <span class="metric-title group relative cursor-default outline-none" tabindex="0">Latency p95
+            <span class="metric-tip pointer-events-none invisible absolute top-full left-0 z-50 mt-1 rounded-md bg-[#0b1428] text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Response time that 95% of requests beat. Lower is better.</span>
+          </span>
+          <span id="hero-p95-source" class="normal-case font-normal tracking-normal text-slate-400"></span>
         </p>
         <p class="mt-1 flex items-baseline gap-2">
           <span id="hero-p95" class="text-5xl font-bold tabular-nums text-[#0b1428]">—</span>
@@ -83,7 +92,11 @@
       </div>
 
       <div class="rounded-2xl bg-white p-4 shadow-sm">
-        <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Memory (RSS)</p>
+        <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <span class="metric-title group relative cursor-default outline-none" tabindex="0">Memory (RSS)
+            <span class="metric-tip pointer-events-none invisible absolute top-full left-0 z-50 mt-1 rounded-md bg-[#0b1428] text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Physical memory the process currently holds, against the container limit.</span>
+          </span>
+        </p>
         <p class="mt-1 flex items-baseline gap-2">
           <span id="hero-rss" class="text-5xl font-bold tabular-nums text-[#0b1428]">—</span>
           <span id="hero-rss-limit" class="text-sm text-slate-500">of 1024 MB</span>
@@ -97,7 +110,9 @@
 
       <div class="flex flex-col justify-between rounded-2xl bg-[#0b1428] p-4 text-white">
         <p class="flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-slate-300">
-          Health
+          <span class="metric-title group relative cursor-default outline-none" tabindex="0">Health
+            <span class="metric-tip pointer-events-none invisible absolute top-full right-0 z-50 mt-1 rounded-md bg-slate-800 text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Overall stability score (0-100) based on memory pressure, errors, and failures.</span>
+          </span>
           <button id="health-info" type="button"
             class="rounded-full border border-slate-500 px-1.5 text-[10px] leading-4 text-slate-300 hover:bg-white/10">i</button>
         </p>
@@ -112,56 +127,79 @@
       </div>
     </section>
 
-    <!-- the three charts, side by side, sized to the viewport -->
-    <section class="grid grid-cols-3 gap-4">
-      <div class="rounded-2xl bg-white p-4 shadow-sm">
+    <!-- the three charts, side by side, sized to the leftover viewport -->
+    <section class="grid min-h-0 flex-1 grid-cols-3 gap-4">
+      <div class="flex h-full min-h-0 flex-col rounded-2xl bg-white p-4 shadow-sm">
         <h3 class="mb-2 text-sm font-semibold text-slate-800">Throughput (req/s)</h3>
-        <div id="throughput-chart" class="h-[34vh] min-h-[200px] w-full"></div>
+        <div id="throughput-chart" class="min-h-[200px] w-full flex-1"></div>
       </div>
-      <div class="rounded-2xl bg-white p-4 shadow-sm">
+      <div class="flex h-full min-h-0 flex-col rounded-2xl bg-white p-4 shadow-sm">
         <h3 class="mb-2 text-sm font-semibold text-slate-800">Latency p95 (ms)
           <span id="latency-note" class="font-normal text-slate-400">— cumulative since the run began</span>
         </h3>
-        <div id="latency-chart" class="h-[34vh] min-h-[200px] w-full"></div>
+        <div id="latency-chart" class="min-h-[200px] w-full flex-1"></div>
       </div>
-      <div class="rounded-2xl bg-white p-4 shadow-sm">
+      <div class="flex h-full min-h-0 flex-col rounded-2xl bg-white p-4 shadow-sm">
         <div class="mb-2 flex items-baseline justify-between">
           <h3 class="text-sm font-semibold text-slate-800">Memory RSS (MB)</h3>
           <span id="ghost-note" class="text-[11px] text-slate-400"></span>
         </div>
-        <div id="memory-chart" class="h-[34vh] min-h-[200px] w-full"></div>
+        <div id="memory-chart" class="min-h-[200px] w-full flex-1"></div>
       </div>
     </section>
 
     <!-- supporting counters -->
     <section class="grid grid-cols-5 gap-3">
-      <div class="rounded-2xl bg-white p-3 shadow-sm" title="Page faults per second in the container's cgroup, and per request.">
-        <p class="text-xs font-medium text-slate-500">Page Faults / s</p>
+      <div class="rounded-2xl bg-white p-3 shadow-sm">
+        <p class="text-xs font-medium text-slate-500">
+          <span class="metric-title group relative cursor-default outline-none" tabindex="0">Page Faults / s
+            <span class="metric-tip pointer-events-none invisible absolute top-full left-0 z-50 mt-1 rounded-md bg-[#0b1428] text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Memory pages loaded from disk per second. Lower means less memory pressure.</span>
+          </span>
+        </p>
         <p id="kpi-faults" class="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">—</p>
         <p id="kpi-faults-req" class="text-xs text-slate-500">—</p>
       </div>
-      <div class="rounded-2xl bg-white p-3 shadow-sm" title="CPU as a percentage of the container's 1 vCPU, and kernel throttling.">
-        <p class="text-xs font-medium text-slate-500">CPU</p>
+      <div class="rounded-2xl bg-white p-3 shadow-sm">
+        <p class="text-xs font-medium text-slate-500">
+          <span class="metric-title group relative cursor-default outline-none" tabindex="0">CPU
+            <span class="metric-tip pointer-events-none invisible absolute top-full left-0 z-50 mt-1 rounded-md bg-[#0b1428] text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Container CPU usage, and how much of it was throttled.</span>
+          </span>
+        </p>
         <p id="kpi-cpu" class="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">—</p>
         <p id="kpi-throttle" class="text-xs text-slate-500">—</p>
       </div>
-      <div class="rounded-2xl bg-white p-3 shadow-sm" title="Iterations k6 could not start because the server could not keep up, as a share of everything offered so far in this run. Underneath: the same ratio over the last second.">
-        <p class="text-xs font-medium text-slate-500">Dropped (run so far)</p>
+      <div class="rounded-2xl bg-white p-3 shadow-sm">
+        <p class="text-xs font-medium text-slate-500">
+          <span class="metric-title group relative cursor-default outline-none" tabindex="0">Dropped (run so far)
+            <span class="metric-tip pointer-events-none invisible absolute top-full left-0 z-50 mt-1 rounded-md bg-[#0b1428] text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Requests that were dropped or failed during the run.</span>
+          </span>
+        </p>
         <p id="kpi-dropped" class="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">—</p>
         <p id="kpi-failed" class="text-xs text-slate-500">—</p>
       </div>
-      <div class="rounded-2xl bg-white p-3 shadow-sm" title="Highest resident memory reached, and whether the kernel killed it.">
-        <p class="text-xs font-medium text-slate-500">Peak RSS</p>
+      <div class="rounded-2xl bg-white p-3 shadow-sm">
+        <p class="text-xs font-medium text-slate-500">
+          <span class="metric-title group relative cursor-default outline-none" tabindex="0">Peak RSS
+            <span class="metric-tip pointer-events-none invisible absolute top-full left-0 z-50 mt-1 rounded-md bg-[#0b1428] text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Highest memory usage reached during the run.</span>
+          </span>
+        </p>
         <p id="kpi-peak" class="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">—</p>
         <p id="kpi-oom" class="text-xs text-slate-500">—</p>
       </div>
-      <div class="rounded-2xl bg-white p-3 shadow-sm" title="Allocations no arena could serve, over all allocations SAMM saw.">
-        <p class="text-xs font-medium text-slate-500">Fallback Rate</p>
+      <div class="rounded-2xl bg-white p-3 shadow-sm">
+        <p class="text-xs font-medium text-slate-500">
+          <span class="metric-title group relative cursor-default outline-none" tabindex="0">Fallback Rate
+            <span class="metric-tip pointer-events-none invisible absolute top-full right-0 z-50 mt-1 rounded-md bg-[#0b1428] text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Share of allocations that fell back to the system allocator instead of SAMM's arenas.</span>
+          </span>
+        </p>
         <p id="fallback-rate-value" class="mt-0.5 text-2xl font-bold tabular-nums text-slate-900">—</p>
         <p id="fallback-note" class="text-xs text-slate-500">—</p>
       </div>
     </section>
+  </div>
+  </div>
 
+  <main class="flex flex-col gap-4 px-8 py-4">
     <!-- ================================================== zone 2: the detail -->
     <!-- Evidence for each ML layer. There is no single "accuracy %": none of the
          three layers has labelled ground truth, so each is judged by the kind

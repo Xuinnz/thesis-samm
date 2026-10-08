@@ -314,3 +314,68 @@
   text-align: center;
   color: #94a3b8;
 }
+
+/* v2.html only: blank ML validation values until Boost with SAMM.
+   Titles, subtitles and row labels stay. Real text remains in the DOM. */
+#ml-validation:not([data-mode="samm"]) #val1-big,
+#ml-validation:not([data-mode="samm"]) #val1-caption,
+#ml-validation:not([data-mode="samm"]) #val1-chip,
+#ml-validation:not([data-mode="samm"]) #val1-big + span,
+#ml-validation:not([data-mode="samm"]) #val2-big,
+#ml-validation:not([data-mode="samm"]) #val2-caption,
+#ml-validation:not([data-mode="samm"]) #val2-big + span,
+#ml-validation:not([data-mode="samm"]) #val2-saved,
+#ml-validation:not([data-mode="samm"]) #val3-big,
+#ml-validation:not([data-mode="samm"]) #val3-caption,
+#ml-validation:not([data-mode="samm"]) #val3-big + span,
+#ml-validation:not([data-mode="samm"]) #val3-caveat,
+#ml-validation:not([data-mode="samm"]) #val3-legend,
+#ml-validation:not([data-mode="samm"]) #val1-rows > div > span:last-child,
+#ml-validation:not([data-mode="samm"]) #val2-rows > div > span:last-child,
+#ml-validation:not([data-mode="samm"]) #val3-rows > div > span:last-child {
+  position: relative;
+  visibility: hidden;
+}
+
+#ml-validation:not([data-mode="samm"]) #val1-big::after,
+#ml-validation:not([data-mode="samm"]) #val1-caption::after,
+#ml-validation:not([data-mode="samm"]) #val1-chip::after,
+#ml-validation:not([data-mode="samm"]) #val2-big::after,
+#ml-validation:not([data-mode="samm"]) #val2-caption::after,
+#ml-validation:not([data-mode="samm"]) #val2-saved::after,
+#ml-validation:not([data-mode="samm"]) #val3-big::after,
+#ml-validation:not([data-mode="samm"]) #val3-caption::after,
+#ml-validation:not([data-mode="samm"]) #val3-caveat::after,
+#ml-validation:not([data-mode="samm"]) #val3-legend::after,
+#ml-validation:not([data-mode="samm"]) #val1-rows > div > span:last-child::after,
+#ml-validation:not([data-mode="samm"]) #val2-rows > div > span:last-child::after,
+#ml-validation:not([data-mode="samm"]) #val3-rows > div > span:last-child::after {
+  content: "—";
+  visibility: visible;
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+#ml-validation:not([data-mode="samm"]) #val3-bar > * {
+  visibility: hidden;
+}
+
+/* Title hover tips: abspos shrink-to-fit uses the title's box, so max-width
+   alone wraps to a word column. Unlayered so this beats Tailwind utilities. */
+.metric-title,
+.metric-title .metric-tip {
+  cursor: default;
+}
+
+.metric-title .metric-tip {
+  width: max-content;
+  max-width: 18rem;
+  white-space: normal;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+}
