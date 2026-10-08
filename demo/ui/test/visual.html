@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<!-- Manual visual check for the charts: canned data, no SSE.
+
+     Open http://localhost:9100/test/visual.html while any collector is running,
+     or screenshot it headless. It exists because jsdom has no canvas, so only a
+     real browser can show whether a LINE is actually painted -- which is how
+     the series.stroke regression went unnoticed. -->
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>chart visual check</title>
+  <link rel="stylesheet" href="../styles/output.css">
+  <script src="../vendor/uPlot.iife.min.js"></script>
+  <link rel="stylesheet" href="../vendor/uPlot.min.css">
+</head>
+
+<body class="bg-[#e8edf4] p-6">
+  <div class="grid grid-cols-3 gap-4">
+    <div class="rounded-2xl bg-white p-5 shadow-sm">
+      <h3 class="mb-3 text-sm font-semibold">Memory Consumption (MB)</h3>
+      <div id="memory-chart" class="h-64 w-full"></div>
+    </div>
+    <div class="rounded-2xl bg-white p-5 shadow-sm">
+      <h3 class="mb-3 text-sm font-semibold">Throughput (Requests/sec)</h3>
+      <div id="throughput-chart" class="h-64 w-full"></div>
+    </div>
+    <div class="rounded-2xl bg-white p-5 shadow-sm">
+      <h3 class="mb-3 text-sm font-semibold">Latency p95 (ms)</h3>
+      <div id="latency-chart" class="h-64 w-full"></div>
+    </div>
+  </div>
+  <p id="verdict" class="mt-4 font-mono text-sm"></p>
+
+  <script src="../js/charts.js"></script>
+  <script>
+    const n = 60;
+    const seq = (f) => Array.from({ length: n }, (_, i) => f(i));
+    // Same shape live.js produces: rolling (p95r) and cumulative (p95c) kept
+    // apart, and a flag saying which one the run has.
+    const live = {
+      status: { mode: 'samm' },
+      sample: { limit_mb: 1024 },
+      latency: { source: 'rolling', window_s: 5 },
+      series: {
+        t: seq((i) => i),
+        rss: seq((i) => 300 + i * 9 + Math.sin(i / 3) * 20),
+        rps: seq((i) => 500 + Math.sin(i / 5) * 120),
+        p95r: seq((i) => 80 + Math.abs(Math.sin(i / 4)) * 400),
+        p95c: seq(() => null),
+      },
+      ghost: {
+        mode: 'baseline', k: '2.5', seed: 2025,
+        series: {
+          t: seq((i) => i),
+          rss: seq((i) => 400 + i * 10),
+          rps: seq((i) => 300 + Math.cos(i / 5) * 90),
+          p95r: seq((i) => 200 + Math.abs(Math.cos(i / 4)) * 700),
+          p95c: seq(() => null),
+          hasRolling: true,
+        },
+      },
+    };
+
+    const errors = [];
+    window.addEventListener('error', (e) => errors.push(e.message));
+    // charts.js initialises itself on DOMContentLoaded. This listener is
+    // registered after that one, so it runs second, with the charts already
+    // built -- calling Charts.init() here would build a second set on top.
+    window.addEventListener('DOMContentLoaded', () => {
+    try {
+      Charts.render(live);
+      // Render as the other mode and back: recolouring the live series is what
+      // used to break every subsequent draw.
+      Charts.render({ ...live, status: { mode: 'baseline' } });
+      Charts.render(live);
+    } catch (err) {
+      errors.push(err.message);
+    }
+
+    // A painted line leaves non-white pixels in the plot area.
+    const canvas = document.querySelector('canvas');
+    let inked = 0;
+    try {
+      const ctx = canvas.getContext('2d');
+      const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i + 3] > 0 && (data[i] < 240 || data[i + 1] < 240 || data[i + 2] < 240)) inked++;
+      }
+    } catch (err) {
+      errors.push(`pixel read failed: ${err.message}`);
+    }
+
+    document.getElementById('verdict').textContent = errors.length
+      ? `FAILED: ${errors.join(' | ')}`
+      : `${inked > 500 ? 'OK' : 'FAILED: lines missing'} — ` +
+        `${document.querySelectorAll('canvas').length} canvases, ${inked} painted pixels in the first plot`;
+    });
+  </script>
+</body>
+
+</html>

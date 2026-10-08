@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SAMM Dashboard</title>
+  <link rel="stylesheet" href="styles/output.css">
+  <!-- Vendored, not from a CDN: the demo machines may be offline. -->
+  <script src="vendor/uPlot.iife.min.js"></script>
+  <link rel="stylesheet" href="vendor/uPlot.min.css">
+</head>
+
+<body class="min-h-screen min-w-[1440px] bg-[#e8edf4] text-slate-900 antialiased">
+  <header class="sticky top-0 z-40 flex w-full flex-nowrap items-center justify-between bg-white px-8 py-4 shadow-sm">
+    <div class="flex shrink-0 items-center gap-5">
+      <a href="#" aria-label="Scroll to top" class="cursor-pointer">
+        <img src="design/Logo.svg" alt="SAMM Logo" class="h-16 w-auto object-contain">
+      </a>
+      <div class="flex flex-col gap-1">
+        <span id="mode-badge" class="w-fit rounded-full px-3 py-1 text-xs font-bold tracking-wide">—</span>
+        <span class="flex items-center gap-2 text-xs text-slate-500">
+          <span id="link-dot" class="inline-block h-2 w-2 rounded-full bg-slate-300"></span>
+          <span id="link-text">connecting…</span>
+        </span>
+      </div>
+    </div>
+    <div class="flex shrink-0 items-center gap-4">
+      <span id="run-pill" class="hidden whitespace-nowrap rounded-full bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700"></span>
+      <button id="test-btn" type="button"
+        class="whitespace-nowrap rounded-full border-2 border-slate-900 bg-white px-5 py-2 text-sm font-semibold text-slate-900 disabled:cursor-not-allowed disabled:opacity-40">Test
+        with K6</button>
+      <button id="boost-btn" type="button"
+        class="whitespace-nowrap rounded-full bg-[#0b1428] px-5 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">Boost
+        with SAMM</button>
+      <button id="history-btn" type="button"
+        class="whitespace-nowrap rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700">History</button>
+      <button id="help-btn" type="button"
+        class="whitespace-nowrap text-sm text-slate-500 underline-offset-2 hover:underline">Need Help?</button>
+      <a href="v2.html" class="whitespace-nowrap text-xs text-slate-400 underline-offset-2 hover:underline">compact layout</a>
+    </div>
+  </header>
+
+  <main class="grid grid-cols-[minmax(0,3fr)_minmax(0,2fr)] items-stretch gap-6 px-8 py-6">
+    <!-- ============================================================ left -->
+    <section class="flex flex-col gap-5">
+      <h1 id="status-headline" class="text-5xl font-bold tracking-tight text-[#0b1428]">Waiting for the container…</h1>
+
+      <div class="rounded-2xl bg-white p-5 shadow-sm">
+        <div class="mb-3 flex items-center justify-between">
+          <h2 class="text-base font-semibold text-slate-800">Memory Density Tracker</h2>
+          <span id="memory-density-current" class="text-sm font-bold text-slate-800">—</span>
+        </div>
+        <div id="memory-density-blocks" class="flex gap-1"></div>
+        <div class="mt-3 flex w-full items-center justify-between text-xs text-slate-500">
+          <span>0</span>
+          <span>512 MB</span>
+          <span id="density-cap" class="rounded-full bg-[#0b1428] px-2 py-0.5 font-medium text-white">1024 MB cap</span>
+        </div>
+      </div>
+
+      <div class="flex flex-1 flex-col rounded-2xl bg-[#0b1428] p-6 text-white">
+        <div class="mb-4 flex items-center justify-between">
+          <h2 class="text-lg font-semibold">Arena</h2>
+          <span id="arena-subtitle" class="text-xs text-slate-400">capacity from the routing table</span>
+        </div>
+        <div id="arena-content" class="flex flex-1 flex-col"></div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-4">
+        <div class="flex h-72 flex-col overflow-hidden rounded-2xl bg-[#0b1428] text-white">
+          <div class="flex flex-1 flex-col items-center justify-center border-b border-white/15 px-4">
+            <span class="mb-1 text-sm font-medium text-slate-300">K-Means Clusters Found</span>
+            <span id="kmeans-clusters-value" class="text-4xl font-bold">—</span>
+            <span id="kmeans-note" class="mt-1 text-center text-xs text-slate-400"></span>
+          </div>
+          <div class="flex flex-1 flex-col items-center justify-center px-4">
+            <span class="mb-1 text-sm font-medium text-slate-300" title="Allocations that no arena could serve, divided by all allocations SAMM handled. Live, from the allocator.">Fallback Rate</span>
+            <span id="fallback-rate-value" class="text-4xl font-bold">—</span>
+            <span id="fallback-note" class="mt-1 text-center text-xs text-slate-400"></span>
+          </div>
+        </div>
+
+        <div class="flex h-72 flex-col rounded-2xl bg-white p-5 shadow-sm">
+          <h3 class="mb-1 text-center text-base font-bold text-slate-800">Arena Choice</h3>
+          <p class="mb-3 text-center text-xs text-slate-500">whichever wastes fewer bytes wins</p>
+          <div id="policy-rule-body" class="flex flex-1 flex-col justify-center gap-1 text-xs"></div>
+        </div>
+
+        <div class="flex h-72 flex-col rounded-2xl bg-white p-5 shadow-sm">
+          <h3 class="mb-1 text-center text-base font-bold text-slate-800">Escape Detection</h3>
+          <p class="mb-3 text-center text-xs text-slate-500">k-means on scope overhang</p>
+          <div id="escape-rule-body" class="flex flex-1 flex-col justify-center gap-1 text-xs"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================================================== right -->
+    <section class="flex flex-col gap-5">
+      <div class="grid grid-cols-[1.3fr_1fr_1fr] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div class="bg-[#0b1428] px-4 py-5 text-white">
+          <p class="mb-2 flex items-center gap-1 text-xs font-medium text-slate-300">
+            System Stability Health Score
+            <button id="health-info" type="button" class="rounded-full border border-slate-500 px-1.5 text-[10px] leading-4 text-slate-300 hover:bg-white/10" title="How is this computed?">i</button>
+          </p>
+          <p class="flex items-baseline gap-1">
+            <span id="health-score-value" class="text-4xl font-bold">—</span>
+            <span class="text-sm text-slate-400">/100</span>
+          </p>
+        </div>
+        <div class="border-l border-slate-200 bg-slate-50 px-4 py-5">
+          <p class="mb-2 text-xs font-medium text-slate-500">System Status</p>
+          <span id="system-status-value" class="text-xl font-semibold text-slate-800">—</span>
+        </div>
+        <div class="border-l border-slate-200 bg-slate-50 px-4 py-5">
+          <p class="mb-2 text-xs font-medium text-slate-500">Memory Load</p>
+          <span id="memory-load-value" class="text-xl font-semibold text-slate-800">—</span>
+        </div>
+      </div>
+
+      <!-- live counters the study actually reports -->
+      <div class="grid grid-cols-4 gap-3">
+        <div class="rounded-2xl bg-white p-4 shadow-sm" title="Page faults per second in the container's cgroup, and per request.">
+          <p class="text-xs font-medium text-slate-500">Page Faults / s</p>
+          <p id="kpi-faults" class="mt-1 text-2xl font-bold text-slate-900">—</p>
+          <p id="kpi-faults-req" class="text-xs text-slate-500">—</p>
+        </div>
+        <div class="rounded-2xl bg-white p-4 shadow-sm" title="CPU used, as a percentage of the container's 1 vCPU, and how many periods the kernel throttled it.">
+          <p class="text-xs font-medium text-slate-500">CPU</p>
+          <p id="kpi-cpu" class="mt-1 text-2xl font-bold text-slate-900">—</p>
+          <p id="kpi-throttle" class="text-xs text-slate-500">—</p>
+        </div>
+        <div class="rounded-2xl bg-white p-4 shadow-sm" title="Iterations k6 could not start because the server could not keep up, as a share of everything offered so far in this run. Underneath: the same ratio over the last second.">
+          <p class="text-xs font-medium text-slate-500">Dropped (run so far)</p>
+          <p id="kpi-dropped" class="mt-1 text-2xl font-bold text-slate-900">—</p>
+          <p id="kpi-failed" class="text-xs text-slate-500">—</p>
+        </div>
+        <div class="rounded-2xl bg-white p-4 shadow-sm" title="Highest resident memory the container has reached, and whether the kernel killed it.">
+          <p class="text-xs font-medium text-slate-500">Peak RSS</p>
+          <p id="kpi-peak" class="mt-1 text-2xl font-bold text-slate-900">—</p>
+          <p id="kpi-oom" class="text-xs text-slate-500">—</p>
+        </div>
+      </div>
+
+      <div class="rounded-2xl bg-white p-5 shadow-sm">
+        <div class="mb-3 flex items-center justify-between">
+          <h3 class="text-sm font-semibold text-slate-800">Memory Consumption (MB)</h3>
+          <span id="ghost-note" class="text-xs text-slate-400"></span>
+        </div>
+        <div id="memory-chart" class="h-64 w-full"></div>
+      </div>
+      <div class="rounded-2xl bg-white p-5 shadow-sm">
+        <h3 class="mb-3 text-sm font-semibold text-slate-800">Throughput (Requests/sec)</h3>
+        <div id="throughput-chart" class="h-64 w-full"></div>
+      </div>
+      <div class="rounded-2xl bg-white p-5 shadow-sm">
+        <h3 class="mb-3 text-sm font-semibold text-slate-800">Latency p95 (ms)
+          <span class="font-normal text-slate-400">— p99 arrives in the end-of-run summary</span>
+        </h3>
+        <div id="latency-chart" class="h-64 w-full"></div>
+      </div>
+
+      <div class="flex flex-1 flex-col rounded-2xl bg-white p-5 shadow-sm">
+        <h3 class="mb-3 text-sm font-semibold text-slate-800">Allocator</h3>
+        <div id="allocator-body" class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ====================================================== run config -->
+  <div id="run-modal" class="boost-modal hidden" aria-hidden="true">
+    <div class="boost-modal-card">
+      <h2 class="boost-modal-title">Run a k6 load test</h2>
+      <form id="run-form" class="samm-form">
+        <label class="samm-field">
+          <span>Load point (k)</span>
+          <select id="run-k" name="k"></select>
+          <small id="run-k-note">arrival rate scales by k, every hold by 1/k</small>
+        </label>
+        <label class="samm-field">
+          <span>Schedule seed</span>
+          <input id="run-seed" name="seed" type="number" min="0" step="1">
+          <small>same seed = same request stream on both machines</small>
+        </label>
+        <label class="samm-field">
+          <span>Minutes</span>
+          <input id="run-minutes" name="minutes" type="number" min="1" max="60" step="1">
+          <small>3 is a demo; the study uses 10</small>
+        </label>
+        <p id="run-error" class="samm-error hidden"></p>
+        <div class="samm-actions">
+          <button type="button" id="run-cancel" class="samm-btn-ghost">Cancel</button>
+          <button type="submit" id="run-start" class="samm-btn">Start run</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===================================================== stage popup -->
+  <div id="boost-modal" class="boost-modal hidden" aria-hidden="true">
+    <div class="boost-modal-card">
+      <h2 id="modal-title" class="boost-modal-title">Switching allocator</h2>
+      <div id="modal-spinner" class="boost-modal-spinner">
+        <div class="boost-spinner-ring"></div>
+      </div>
+      <p id="modal-status-text" class="boost-modal-status"></p>
+      <ul id="modal-stage-list" class="samm-stage-list"></ul>
+      <button id="modal-done-btn" type="button" class="boost-modal-done hidden">Done</button>
+    </div>
+  </div>
+
+  <!-- ==================================================== run summary -->
+  <div id="final-modal" class="boost-modal hidden" aria-hidden="true">
+    <div class="boost-modal-card">
+      <h2 class="boost-modal-title">Run complete</h2>
+      <div id="final-body" class="samm-summary"></div>
+      <button id="final-close" type="button" class="boost-modal-done">Close</button>
+    </div>
+  </div>
+
+  <!-- =================================================== container died -->
+  <div id="death-modal" class="boost-modal hidden" aria-hidden="true">
+    <div class="boost-modal-card">
+      <h2 id="death-title" class="boost-modal-title">Container died</h2>
+      <p id="death-reason" class="boost-modal-status"></p>
+      <div id="death-body" class="samm-summary"></div>
+      <button id="death-close" type="button" class="boost-modal-done">Close</button>
+    </div>
+  </div>
+
+  <!-- ======================================================== history -->
+  <div id="history-modal" class="boost-modal hidden" aria-hidden="true">
+    <div class="boost-modal-card samm-help-card">
+      <h2 class="boost-modal-title">Run history</h2>
+      <p class="boost-modal-status">Every completed run on this machine. Pick one to draw it as the reference line.</p>
+      <div id="history-body" class="samm-history"></div>
+      <button id="history-close" type="button" class="boost-modal-done">Close</button>
+    </div>
+  </div>
+
+  <!-- ========================================================== help -->
+  <div id="help-modal" class="boost-modal hidden" aria-hidden="true">
+    <div class="boost-modal-card samm-help-card">
+      <h2 class="boost-modal-title">What the numbers mean</h2>
+      <div id="help-body" class="samm-help"></div>
+      <button id="help-close" type="button" class="boost-modal-done">Close</button>
+    </div>
+  </div>
+
+  <script src="js/live.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/dashboard.js"></script>
+</body>
+
+</html>

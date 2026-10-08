@@ -10,3 +10,8 @@ docker/
 .git
 .gitignore
 *.md
+# Zig build artifacts — host-built output must never leak into the image;
+# the builder stage compiles the allocator from source inside the container.
+**/zig-out
+**/.zig-cache
+**/zig-cache

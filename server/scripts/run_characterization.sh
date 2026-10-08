@@ -29,10 +29,14 @@ set -euo pipefail
 # needs to reach docker/, load-generator/, and datasets/.
 # ---------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 COMPOSE_FILE="$REPO_ROOT/docker/baseline-environment/docker-compose.yml"
 TRACE_FILE="$REPO_ROOT/datasets/shadow-telemetry/raw/training_trace.csv"
+# The profiler writes this beside the trace: one row per request, with the
+# times its scope opened and closed. Also append-mode, so it needs the same
+# stale-file treatment.
+SCOPE_FILE="$REPO_ROOT/datasets/shadow-telemetry/raw/scope_trace.csv"
 K6_SCENARIO_DIR="$REPO_ROOT/load-generator/k6-scenarios"
 K6_SCENARIO_FILE="samm-load-test.js"
 
@@ -47,6 +51,10 @@ MAX_RPS="${MAX_RPS:-50}"
 SIMULATION_MINUTES="${SIMULATION_MINUTES:-20}"
 PRE_ALLOCATED_VUS="${PRE_ALLOCATED_VUS:-50}"
 MAX_VUS="${MAX_VUS:-200}"
+# Optional fixed seed for the Markov walk. Left unset by default (fresh
+# random walk each run); the pipeline sets it so a characterization pass
+# is reproducible.
+SCHEDULE_SEED="${SCHEDULE_SEED:-}"
 
 # Data paths fed to the k6 scenario's __ENV overrides.
 MARKOV_MATRIX_PATH="${MARKOV_MATRIX_PATH:-../../datasets/azure-trace-2019/processed/traffic-models/markov_transition_matrix.csv}"
@@ -111,7 +119,7 @@ docker compose -f "$COMPOSE_FILE" down || true
 # mixes with old data with no warning. Always start from a clean file.
 # ---------------------------------------------------------------------
 log "Step 2/7: Removing stale training_trace.csv (if present)..."
-rm -f "$TRACE_FILE"
+rm -f "$TRACE_FILE" "$SCOPE_FILE"
 
 # ---------------------------------------------------------------------
 # 3. Rebuild the image
@@ -134,6 +142,7 @@ docker compose -f "$COMPOSE_FILE" up -d characterization
 CONTAINER_STARTED=1
 
 log "Waiting for the server to become healthy (timeout: ${HEALTH_CHECK_TIMEOUT_S}s)..."
+
 elapsed=0
 until curl -sf "$HEALTH_URL" > /dev/null 2>&1; do
     sleep 1
@@ -145,6 +154,15 @@ until curl -sf "$HEALTH_URL" > /dev/null 2>&1; do
     fi
 done
 log "Server is healthy after ${elapsed}s."
+# Record WHICH workload this trace describes. The compiled table is only valid
+# for these parameters; the server refuses to boot against any other set.
+WORKLOAD_MANIFEST="$REPO_ROOT/datasets/shadow-telemetry/raw/workload_manifest.json"
+if curl -sf "$BASE_URL/workload" -o "$WORKLOAD_MANIFEST"; then
+    echo "[characterization] workload fingerprint: $(python3 -c "import json,sys;print(json.load(open('$WORKLOAD_MANIFEST'))['fingerprint'])" 2>/dev/null || echo '?')"
+else
+    echo "ERROR: could not read /workload. The trace would be unattributable."
+    exit 1
+fi
 
 # ---------------------------------------------------------------------
 # 5. Run k6
@@ -163,6 +181,7 @@ log "Step 5/7: Running k6 (${SIMULATION_MINUTES} minutes, MAX_RPS=${MAX_RPS})...
         -e SIMULATION_MINUTES="$SIMULATION_MINUTES" \
         -e PRE_ALLOCATED_VUS="$PRE_ALLOCATED_VUS" \
         -e MAX_VUS="$MAX_VUS" \
+        ${SCHEDULE_SEED:+-e SCHEDULE_SEED="$SCHEDULE_SEED"} \
         "$K6_SCENARIO_FILE"
 )
 log "k6 run complete."
@@ -193,11 +212,13 @@ if [ ! -f "$TRACE_FILE" ]; then
     exit 1
 fi
 
-"$PYTHON_BIN" - "$TRACE_FILE" << 'PYEOF'
+"$PYTHON_BIN" - "$TRACE_FILE" "$SCOPE_FILE" << 'PYEOF'
+import os
 import sys
 import pandas as pd
 
 path = sys.argv[1]
+scope_path = sys.argv[2]
 df = pd.read_csv(path)
 
 total = len(df)
@@ -209,6 +230,16 @@ print(f"Total records     : {total:,}")
 print(f"Right-censored     : {censored:,} ({censored_pct:.4f}%)")
 print(f"\nRecords per call-site hash:")
 print(df['call_site_hash'].value_counts().to_string())
+
+if os.path.exists(scope_path) and 'scope_id' in df.columns:
+    scopes = pd.read_csv(scope_path)
+    unscoped = int((df['scope_id'] == 0).sum())
+    print(f"\nScopes (requests) recorded : {len(scopes):,}")
+    print(f"Allocations with a scope   : {total - unscoped:,} "
+          f"({100 * (total - unscoped) / total:.2f}%)" if total else "")
+    print(f"Allocations without a scope: {unscoped:,}")
+else:
+    print("\nWARNING: no scope_trace.csv produced — escape rate cannot be measured.")
 print("===================================\n")
 PYEOF
 

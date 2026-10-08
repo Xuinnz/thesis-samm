@@ -25,8 +25,46 @@ services:
       - "3000:3000"
     environment:
       SHADOW_PROFILER_ENABLED: "true"
-      SHADOW_PROFILER_CAPACITY: "5000"       # tune based on observed inUse/capacity from stats logging
+      # Concurrently-tracked objects the profiler can hold. Overridable because
+      # it must scale with load: batch.js alone issues ~200 allocations per
+      # request, so at a few hundred RPS the concurrent count runs into the
+      # thousands and a fixed 5000 silently starts dropping records.
+      SHADOW_PROFILER_CAPACITY: "${SHADOW_PROFILER_CAPACITY:-5000}"
       SHADOW_PROFILER_STATS_INTERVAL_MS: "10000"
+      # Workload shape must match the run the compiled table will serve. The
+      # refinery sizes every arena from the demand it observes here, so
+      # characterizing a lighter workload than the benchmark under-provisions
+      # every stratum -- measured: a table fit at a 512KB absolute write cap and
+      # a 100MB untouched retained store sent 54.4% of requests to the fallback
+      # path when asked to serve 25% proportional touching and a 400MB written
+      # store. Empty means the route defaults apply.
+      SAMM_TOUCH_FRACTION: "${SAMM_TOUCH_FRACTION:-}"
+      SAMM_RETAINED_BYTES: "${SAMM_RETAINED_BYTES:-}"
+      # MUST be passed here too, not only in _bench-lib.sh. Compose forwards
+      # only what is declared, so an unlisted variable silently reverts to the
+      # route default -- and characterization then profiles a DIFFERENT workload
+      # than the benchmark serves. Measured consequence: characterization ran
+      # 32MB payloads (trace: mean 8.10MB, max 32.00MB) while the benchmark ran
+      # 16MB, so every quota was fit against twice the demand it would serve.
+      # HOLD_SCALE escaped this only by accident -- k6 inherits system env vars
+      # into __ENV, containers do not.
+      PROCESS_MAX_BYTES: "${PROCESS_MAX_BYTES:-}"
+      # Not read by the server; present so the workload fingerprint can see it.
+      # Lifetime sets how long each object holds its slot, which is the
+      # concurrency every quota is derived from.
+      HOLD_SCALE: "${HOLD_SCALE:-1}"
+      PROCESS_HOLD_MS: "${PROCESS_HOLD_MS:-}"
+      ENDPOINT_WEIGHTS: "${ENDPOINT_WEIGHTS:-}"
+      FETCH_BYTES: "${FETCH_BYTES:-}"
+      # jemalloc, not stock glibc. Under the pressure workload glibc reaches the
+      # 1GB ceiling in 76 seconds and the container dies, which would truncate
+      # the trace to an eighth of its scheduled length. The profiler records
+      # call-site, size and lifespan -- properties of the APPLICATION, not of
+      # malloc -- so the C allocator underneath does not change what is
+      # measured; and SAMM itself runs on jemalloc, so this matches the
+      # condition the table is compiled to serve. Set to "" to characterize on
+      # glibc instead.
+      LD_PRELOAD: "${CHARACTERIZATION_LD_PRELOAD-/usr/lib/x86_64-linux-gnu/libjemalloc.so.2}"
     volumes:
       - ../../datasets/shadow-telemetry/raw:/app/datasets/shadow-telemetry/raw
     mem_limit: 1024M
@@ -50,6 +88,24 @@ services:
       - "3000:3000"
     environment:
       SHADOW_PROFILER_ENABLED: "false"
+      SAMM_TOUCH_FRACTION: "${SAMM_TOUCH_FRACTION:-}"
+      SAMM_RETAINED_BYTES: "${SAMM_RETAINED_BYTES:-}"
+      # MUST be passed here too, not only in _bench-lib.sh. Compose forwards
+      # only what is declared, so an unlisted variable silently reverts to the
+      # route default -- and characterization then profiles a DIFFERENT workload
+      # than the benchmark serves. Measured consequence: characterization ran
+      # 32MB payloads (trace: mean 8.10MB, max 32.00MB) while the benchmark ran
+      # 16MB, so every quota was fit against twice the demand it would serve.
+      # HOLD_SCALE escaped this only by accident -- k6 inherits system env vars
+      # into __ENV, containers do not.
+      PROCESS_MAX_BYTES: "${PROCESS_MAX_BYTES:-}"
+      # Not read by the server; present so the workload fingerprint can see it.
+      # Lifetime sets how long each object holds its slot, which is the
+      # concurrency every quota is derived from.
+      HOLD_SCALE: "${HOLD_SCALE:-1}"
+      PROCESS_HOLD_MS: "${PROCESS_HOLD_MS:-}"
+      ENDPOINT_WEIGHTS: "${ENDPOINT_WEIGHTS:-}"
+      FETCH_BYTES: "${FETCH_BYTES:-}"
     mem_limit: 1024M
     memswap_limit: 1024M
     mem_swappiness: 0

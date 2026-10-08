@@ -1,0 +1,17 @@
+{
+  "name": "samm-dashboard",
+  "private": true,
+  "scripts": {
+    "build:css": "npx @tailwindcss/cli -i ./styles/main.css -o ./styles/output.css --minify",
+    "watch:css": "npx @tailwindcss/cli -i ./styles/main.css -o ./styles/output.css --watch",
+    "test": "node test/render_test.js index.html && node test/render_test.js v2.html"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4",
+    "jsdom": "^30.1.0",
+    "tailwindcss": "^4"
+  },
+  "dependencies": {
+    "uplot": "^1.6.31"
+  }
+}

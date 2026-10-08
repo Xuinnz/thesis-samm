@@ -35,7 +35,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 COMPOSE_FILE="$REPO_ROOT/docker/baseline-environment/docker-compose.yml"
 TRACE_FILE="$REPO_ROOT/datasets/shadow-telemetry/raw/training_trace.csv"

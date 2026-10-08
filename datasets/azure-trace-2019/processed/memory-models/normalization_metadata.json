@@ -1,0 +1,8 @@
+{
+    "container_ceiling_mb": 1024.0,
+    "v8_and_node_reserved_mb": 200.0,
+    "effective_ceiling_mb": 824.0,
+    "global_p99_azure_anchor_mb": 680.4100000000024,
+    "apps_processed": 23961,
+    "sample_count_carried": true
+}

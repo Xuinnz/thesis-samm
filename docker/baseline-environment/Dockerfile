@@ -57,6 +57,15 @@ RUN cd server/baseline-v8 && npm install --omit=dev
 # ---------------------------------------------------------------------
 FROM node:22-bookworm-slim AS runtime
 
+# jemalloc, for the allocator-attribution comparison. Installed but NOT active:
+# it only takes effect when LD_PRELOAD names it at `docker run` time, so the
+# default baseline still runs on glibc malloc exactly as before. Present in the
+# image so that all baseline variants come from one identical build and differ
+# only by environment.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libjemalloc2 && \
+    rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Profiler: compiled addon + JS wrapper (no source, no build tools needed)
