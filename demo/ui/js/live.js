@@ -24,6 +24,7 @@ const Live = {
   // p95r: rolling window (null where a window is missing). p95c: cumulative.
   series: { t: [], rss: [], rps: [], p95r: [], p95c: [] },
   hasRolling: false, // has this run produced a rolling window yet?
+  hasLatency: false, // ...or any p95 at all?
   t0: null,
   ghost: null,        // the other mode's last recorded run
   stages: [],
@@ -168,9 +169,13 @@ function pushSample(s) {
       Live.hasRolling = true;
       Live.rollWindow = s.roll_window_s;
     }
+    if (s.e2e_p95 !== null && s.e2e_p95 !== undefined) Live.hasLatency = true;
+    // 'none' until the first request: before then there is no statistic to
+    // name, and calling it cumulative made the label flip when load began.
     Live.latency = Live.hasRolling
       ? { source: 'rolling', window_s: Live.rollWindow }
-      : { source: 'cumulative', window_s: null };
+      : Live.hasLatency ? { source: 'cumulative', window_s: null }
+      : { source: 'none', window_s: null };
     for (const key of Object.keys(Live.series)) {
       if (Live.series[key].length > MAX_POINTS) Live.series[key].shift();
     }
@@ -201,17 +206,34 @@ Live.latencyOf = latencyOf;
 function referenceComparable(live) {
   const g = live.ghost && live.ghost.series;
   if (!g) return true;
-  return Boolean(g.hasRolling) === Boolean(live.latency && live.latency.source === 'rolling');
+  const source = live.latency && live.latency.source;
+  if (source !== 'rolling' && source !== 'cumulative') return true;  // nothing live yet
+  return Boolean(g.hasRolling) === (source === 'rolling');
 }
 Live.referenceComparable = referenceComparable;
-Live.latency = { source: 'cumulative', window_s: null };
+
+/**
+ * Which p95 series the latency chart and the hero read, for the live run and
+ * the reference alike. Before the live run has any latency, the reference's
+ * own statistic.
+ */
+function latencyField(live) {
+  const source = live.latency && live.latency.source;
+  if (source === 'rolling') return 'p95r';
+  if (source === 'cumulative') return 'p95c';
+  const g = live.ghost && live.ghost.series;
+  return g && g.hasRolling ? 'p95r' : 'p95c';
+}
+Live.latencyField = latencyField;
+Live.latency = { source: 'none', window_s: null };
 
 /** A run is the natural zero for the x axis, so the charts start with it. */
 function resetSeries() {
   Live.series = { t: [], rss: [], rps: [], p95r: [], p95c: [] };
   Live.t0 = null;
   Live.hasRolling = false;
-  Live.latency = { source: 'cumulative', window_s: null };
+  Live.hasLatency = false;
+  Live.latency = { source: 'none', window_s: null };
 }
 Live.resetSeries = resetSeries;
 
@@ -221,7 +243,21 @@ function connect() {
   es.addEventListener('open', () => { Live.connected = true; notify(); });
   es.addEventListener('error', () => { Live.connected = false; notify(); });  // EventSource retries on its own
 
-  es.addEventListener('hello', (e) => { Live.hello = JSON.parse(e.data); notify(); });
+  es.addEventListener('hello', (e) => {
+    const hello = JSON.parse(e.data);
+    // A different collector than before (restarted, or a new replay): the old
+    // run's points must not carry over, and its run-start event, which would
+    // normally clear them, was sent before this page reconnected.
+    if (Live.hello && hello.session !== Live.hello.session) {
+      resetSeries();
+      Live.final = null;
+      Live.death = null;
+      // Its mode may differ, and the reference line is the other mode's run.
+      refreshStatus().then(loadGhost);
+    }
+    Live.hello = hello;
+    notify();
+  });
 
   es.addEventListener('metrics', (e) => {
     Live.connected = true;
@@ -290,20 +326,24 @@ async function loadGhost() {
   const list = await getJson('/recordings');
   if (!list || !mine) return;
   if (Live.ghost && Live.ghost.pinned) return;      // the user chose this one
-  const other = list.recordings.find((r) => r.mode && r.mode !== mine);
-  if (!other) { Live.ghost = null; return; }
-  if (Live.ghost && Live.ghost.name === other.name) return;
-
-  let text;
-  try {
-    const res = await fetch(`/recordings/${encodeURIComponent(other.name)}`, { cache: 'no-store' });
-    if (!res.ok) return;
-    text = await res.text();
-  } catch { return; }
-
-  const series = seriesFromRecording(text);
-  Live.ghost = series ? { ...other, series } : null;
-  notify();
+  // Newest first, skipping runs that never carried traffic: a run stopped in
+  // its first seconds still leaves a recording, and as the reference it would
+  // draw nothing and label the latency "not comparable".
+  for (const other of list.recordings.filter((r) => r.mode && r.mode !== mine)) {
+    if (Live.ghost && Live.ghost.name === other.name) return;
+    let text;
+    try {
+      const res = await fetch(`/recordings/${encodeURIComponent(other.name)}`, { cache: 'no-store' });
+      if (!res.ok) continue;
+      text = await res.text();
+    } catch { continue; }
+    const series = seriesFromRecording(text);
+    if (!series || !series.rps.some((v) => v > 0)) continue;
+    Live.ghost = { ...other, series };
+    notify();
+    return;
+  }
+  Live.ghost = null;
 }
 
 /** The metrics events of a recording, as chart series on their own clock. */

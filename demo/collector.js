@@ -52,6 +52,9 @@ const K6_API = arg('k6', 'http://127.0.0.1:6565');
 const SERVER = arg('server', 'http://127.0.0.1:3000');
 const INTERVAL_MS = Number(arg('interval', 1000));
 const REPLAY = arg('replay', null);
+// Sent in every hello. A page left open across a collector restart (a new
+// replay, say) reconnects on its own; this is how it knows to start clean.
+const SESSION = Date.now();
 const RECORD_DIR = path.join(__dirname, 'recordings');
 const UI_DIR = path.join(__dirname, 'ui');
 const { readTable } = require('./table');
@@ -751,7 +754,7 @@ const server = http.createServer(async (req, res) => {
       Connection: 'keep-alive',
       'Access-Control-Allow-Origin': '*',
     });
-    res.write(`event: hello\ndata: ${JSON.stringify({ label: LABEL, container: CONTAINER, replay: Boolean(REPLAY) })}\n\n`);
+    res.write(`event: hello\ndata: ${JSON.stringify({ label: LABEL, container: CONTAINER, replay: Boolean(REPLAY), session: SESSION })}\n\n`);
     clients.add(res);
     req.on('close', () => clients.delete(res));
     return;

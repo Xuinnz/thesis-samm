@@ -44,19 +44,10 @@
       <button id="boost-btn" type="button"
         class="whitespace-nowrap rounded-full bg-[#0b1428] px-5 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">Boost
         with SAMM</button>
-      <!-- SAMM only: pre-fault the floors at container start. Hidden in
-           baseline mode, which has nothing to warm. -->
-      <span id="warmup-group" class="hidden items-center gap-2">
-        <button id="warmup-btn" type="button"
-          title="Pre-fault SAMM's arena floors when the container starts. Removes first-touch page faults from the run, at the cost of RSS starting at the full floor size before any traffic. Restarts the SAMM container."
-          class="whitespace-nowrap rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">Warmup: off</button>
-        <span id="warmup-note" class="whitespace-nowrap text-[11px] text-slate-500"></span>
-      </span>
       <button id="history-btn" type="button"
         class="whitespace-nowrap rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700">History</button>
       <button id="help-btn" type="button"
         class="whitespace-nowrap text-sm text-slate-500 underline-offset-2 hover:underline">Need Help?</button>
-      <a href="index.html" class="whitespace-nowrap text-xs text-slate-400 underline-offset-2 hover:underline">classic layout</a>
     </div>
   </header>
 

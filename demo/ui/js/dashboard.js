@@ -351,16 +351,18 @@ function renderHero(live) {
     ? (p95 === null || p95 === undefined ? 'no window this moment'
       : `last ${live.latency.window_s} s${s.e2e_p99_roll ? ` · p99 ${int(s.e2e_p99_roll)} ms` : ''}`)
     : (p95 === null || p95 === undefined ? '' : 'cumulative'));
+  const noLatency = !live.latency || live.latency.source === 'none';
   text('latency-note', (rollingNow
     ? `— rolling, over the last ${live.latency.window_s} s`
+    : noLatency ? '— waiting for the first requests'
     : '— cumulative since the run began')
     + (live.ghost && !Live.referenceComparable(live)
       ? ` · reference run not drawn: it only has ${live.ghost.series.hasRolling ? 'rolling' : 'cumulative'} latency` : ''));
   const g = live.ghost && live.ghost.series;
-  if (g && Boolean(g.hasRolling) !== Boolean(rollingNow)) {
+  if (g && !Live.referenceComparable(live)) {
     text('hero-p95-prev', `reference run recorded ${g.hasRolling ? 'rolling' : 'cumulative'} latency — not comparable`);
   } else {
-    const pastP95 = past(rollingNow ? 'p95r' : 'p95c');
+    const pastP95 = past(Live.latencyField(live));
     text('hero-p95-prev', prevLabel(pastP95 === null ? null : int(pastP95), ' ms'));
   }
 

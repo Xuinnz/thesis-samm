@@ -87,12 +87,16 @@ async function boot() {
   })).join('\n');
 
   const posted = [];
+  const recordingText = {};      // per-recording bodies; anything else gets ghostLines
   window.fetch = async (url, init) => {
     if (init && init.method === 'POST') {
       posted.push({ url, body: JSON.parse(init.body) });
       return { ok: true, status: 202, json: async () => ({ ok: true }) };
     }
-    if (url.startsWith('/recordings/')) return { ok: true, text: async () => ghostLines };
+    if (url.startsWith('/recordings/')) {
+      const name = decodeURIComponent(url.slice('/recordings/'.length));
+      return { ok: true, text: async () => recordingText[name] ?? ghostLines };
+    }
     const body = routes[url];
     return { ok: body !== undefined, json: async () => body, text: async () => JSON.stringify(body) };
   };
@@ -119,13 +123,13 @@ async function boot() {
     + '\n;window.__Live = Live; window.__charts = charts;');
   window.document.dispatchEvent(new window.Event('DOMContentLoaded'));
   await new Promise((r) => setTimeout(r, 50));      // let start() settle its fetches
-  return { window, errors, table, routes };
+  return { window, errors, table, routes, recordingText };
 }
 
 const txt = (w, id) => w.document.getElementById(id).textContent.trim();
 
 (async () => {
-  const { window, errors, table, routes } = await boot();
+  const { window, errors, table, routes, recordingText } = await boot();
   const Live = window.__Live;
   const emit = (type, data) => { window.__emit(type, data); };
 
@@ -239,6 +243,44 @@ const txt = (w, id) => w.document.getElementById(id).textContent.trim();
     assert.strictEqual(txt(window, 'hero-p95-source'), 'cumulative');
   }
   emit('stage', { name: 'k6', status: 'done', code: 0 });
+
+  // Before the first request there is no statistic to name. Calling it
+  // cumulative made the label flip to rolling the moment load began, and the
+  // reference was briefly "not comparable" for no reason.
+  emit('stage', { name: 'k6', status: 'running', k: '2.0', seed: 2025, minutes: 3 });
+  emit('metrics', sample({ e2e_p95: null, rps: null }));
+  assert.strictEqual(Live.latency.source, 'none');
+  if (has('latency-note')) {
+    assert.match(txt(window, 'latency-note'), /waiting for the first requests/);
+    assert.doesNotMatch(txt(window, 'latency-note'), /not drawn/);
+  }
+  if (has('hero-p95-prev')) assert.doesNotMatch(txt(window, 'hero-p95-prev'), /not comparable/);
+  emit('stage', { name: 'k6', status: 'done', code: 0 });
+
+  // A run stopped in its first seconds still leaves a recording; as the
+  // reference it would draw nothing. The newest run WITH traffic is used.
+  const keptRuns = routes['/recordings'];
+  const emptyRun = 'SAMM-baseline-k2.0-s2025-empty.jsonl';
+  recordingText[emptyRun] = JSON.stringify({ event: 'metrics', data: { t: 1, up: true, rss_mb: 30, rps: null, e2e_p95: null } });
+  routes['/recordings'] = { recordings: [{ name: emptyRun, mode: 'baseline', k: '2.0', seed: 2025, mtime: 2 }, ...keptRuns.recordings] };
+  Live.ghost = null;
+  await Live.loadGhost();
+  assert.strictEqual(Live.ghost && Live.ghost.name, keptRuns.recordings[0].name, 'a recording without traffic must be skipped');
+  routes['/recordings'] = keptRuns;
+
+  // A page left open across a collector restart (a new replay) reconnects on
+  // its own, after the restarted collector's run-start event has gone out. The
+  // new session id in hello is what clears the old run.
+  emit('hello', { label: 'SAMM', session: 1 });
+  emit('metrics', sample({ e2e_p95_roll: 480, roll_window_s: 5 }));
+  assert.ok(Live.series.t.length > 0 && Live.hasRolling);
+  emit('hello', { label: 'SAMM', session: 2 });
+  assert.strictEqual(Live.series.t.length, 0, 'a new collector session must clear the old run');
+  assert.strictEqual(Live.latency.source, 'none');
+  emit('metrics', sample());
+  emit('hello', { label: 'SAMM', session: 2 });
+  assert.strictEqual(Live.series.t.length, 1, 'reconnecting to the same collector must keep the run');
+  await new Promise((r) => setTimeout(r, 20));      // the reset's status + reference refetch
 
   // ------------------------------------------ arenas come from the ML output
   const arenaText = txt(window, 'arena-content');
