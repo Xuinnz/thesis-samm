@@ -9,8 +9,8 @@
 - **Shared** (end of file): results so far, decisions, probe history, things
   to remember.
 
-This folder is committed on the local branch `wip/internal-validation`. Keep it
-private: do not push it. `results/` is gitignored and stays on disk.
+This folder was merged into `main` on 2026-10-17 (user's decision) and is
+published with the next push. `results/` is gitignored and stays on disk.
 
 ---
 
@@ -61,8 +61,8 @@ Notes:
   only if each run can be retried safely.
 - Record the environment: machine type, zone, kernel, Docker version, THP mode
   (the design expects `madvise`).
-- Getting the code there: this branch exists only on the laptop. Copy it with a
-  git bundle or `scp`; do not push it. `results/` will not come along.
+- Getting the code there: clone or pull `main` from GitHub (after pushing).
+  `results/` (laptop pilot data) will not come along.
 - No need to redo on the VM: the `processing_time` fix (Node behaviour;
   `processing_clamped` is recorded on every latency run anyway), the
   detached-Buffer behaviour, and the offline Layer 1 simulation.
@@ -453,7 +453,8 @@ All of the above ran on the laptop (Ryzen 5 6600H, WSL2). It is pilot data now.
   timing fix there only if the realistic or gc-control benchmark is re-run
   before submission). The ~2 ms alloc p95 figure is not cited in the paper.
 - No longer-timeout re-run of the 500-VU stats.
-- This branch stays local and private.
+- The internal-validation work is merged into `main` (2026-10-17); it was kept
+  on a private branch until then.
 
 ## Probe history (x = ratio to the Sept 19 reference; lower is faster)
 
@@ -482,14 +483,8 @@ All of the above ran on the laptop (Ryzen 5 6600H, WSL2). It is pilot data now.
     (OOM-killed at ~151 s of load) and
     `SAMM-samm-k2.5-s2025-2026-10-08T13-31-45-401Z.jsonl`
     (918 req/s, 1.2 % dropped, 0 failed).
-- **Running the probe from `main` without switching branches:** copy it out with
-  `git show wip/internal-validation:internal-validation/host-probe.sh` into a
-  scratch folder `<dir>/internal-validation/`, and add links named `datasets`,
-  `load-generator` and `zig-allocator` in `<dir>` pointing at the repo.
 - **Long jobs.** Run them detached (`setsid nohup ... &`) and watch the log;
   background tool calls die after about 30 min. `/tmp` is wiped when Windows or
   WSL restarts, so keep scripts in the repo.
-- **Keep this branch in sync with `main`.** `main` was last merged in on
-  2026-10-17 (9ad1bbe, up to ef50811). When `main` moves on, merge it in
-  again (`git merge main` on this branch); never merge this branch into `main`
-  (it would be published on the next push).
+- **The old branch `wip/internal-validation`** is fully merged into `main`
+  (9be2e20) and can be deleted (`git branch -d wip/internal-validation`).
