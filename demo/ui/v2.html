@@ -44,19 +44,10 @@
       <button id="boost-btn" type="button"
         class="whitespace-nowrap rounded-full bg-[#0b1428] px-5 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">Boost
         with SAMM</button>
-      <!-- SAMM only: pre-fault the floors at container start. Hidden in
-           baseline mode, which has nothing to warm. -->
-      <span id="warmup-group" class="hidden items-center gap-2">
-        <button id="warmup-btn" type="button"
-          title="Pre-fault SAMM's arena floors when the container starts. Removes first-touch page faults from the run, at the cost of RSS starting at the full floor size before any traffic. Restarts the SAMM container."
-          class="whitespace-nowrap rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40">Warmup: off</button>
-        <span id="warmup-note" class="whitespace-nowrap text-[11px] text-slate-500"></span>
-      </span>
       <button id="history-btn" type="button"
         class="whitespace-nowrap rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700">History</button>
       <button id="help-btn" type="button"
         class="whitespace-nowrap text-sm text-slate-500 underline-offset-2 hover:underline">Need Help?</button>
-      <a href="index.html" class="whitespace-nowrap text-xs text-slate-400 underline-offset-2 hover:underline">classic layout</a>
     </div>
   </header>
 
@@ -92,10 +83,11 @@
       </div>
 
       <div class="rounded-2xl bg-white p-4 shadow-sm">
-        <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <p class="flex items-baseline justify-between text-xs font-semibold uppercase tracking-wide text-slate-500">
           <span class="metric-title group relative cursor-default outline-none" tabindex="0">Memory (RSS)
-            <span class="metric-tip pointer-events-none invisible absolute top-full left-0 z-50 mt-1 rounded-md bg-[#0b1428] text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Physical memory the process currently holds, against the container limit.</span>
+            <span class="metric-tip pointer-events-none invisible absolute top-full left-0 z-50 mt-1 rounded-md bg-[#0b1428] text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Physical memory the process currently holds, against the container limit. Utilization = RSS ÷ container limit.</span>
           </span>
+          <span id="hero-rss-util" class="normal-case font-semibold tracking-normal tabular-nums"></span>
         </p>
         <p class="mt-1 flex items-baseline gap-2">
           <span id="hero-rss" class="text-5xl font-bold tabular-nums text-[#0b1428]">—</span>

@@ -87,12 +87,16 @@ async function boot() {
   })).join('\n');
 
   const posted = [];
+  const recordingText = {};      // per-recording bodies; anything else gets ghostLines
   window.fetch = async (url, init) => {
     if (init && init.method === 'POST') {
       posted.push({ url, body: JSON.parse(init.body) });
       return { ok: true, status: 202, json: async () => ({ ok: true }) };
     }
-    if (url.startsWith('/recordings/')) return { ok: true, text: async () => ghostLines };
+    if (url.startsWith('/recordings/')) {
+      const name = decodeURIComponent(url.slice('/recordings/'.length));
+      return { ok: true, text: async () => recordingText[name] ?? ghostLines };
+    }
     const body = routes[url];
     return { ok: body !== undefined, json: async () => body, text: async () => JSON.stringify(body) };
   };
@@ -119,13 +123,13 @@ async function boot() {
     + '\n;window.__Live = Live; window.__charts = charts;');
   window.document.dispatchEvent(new window.Event('DOMContentLoaded'));
   await new Promise((r) => setTimeout(r, 50));      // let start() settle its fetches
-  return { window, errors, table, routes };
+  return { window, errors, table, routes, recordingText };
 }
 
 const txt = (w, id) => w.document.getElementById(id).textContent.trim();
 
 (async () => {
-  const { window, errors, table, routes } = await boot();
+  const { window, errors, table, routes, recordingText } = await boot();
   const Live = window.__Live;
   const emit = (type, data) => { window.__emit(type, data); };
 
@@ -140,6 +144,10 @@ const txt = (w, id) => w.document.getElementById(id).textContent.trim();
     assert.strictEqual(txt(window, 'hero-p95'), '812');
     assert.strictEqual(txt(window, 'hero-rss'), '931');
     assert.match(txt(window, 'hero-rss-limit'), /of 1024 MB/);
+  }
+  // Memory utilization = RSS ÷ container limit (931 / 1024).
+  if (has('hero-rss-util')) {
+    assert.strictEqual(txt(window, 'hero-rss-util'), 'utilization 90.9%');
   }
   assert.strictEqual(txt(window, 'kpi-cpu'), '67%');
   assert.strictEqual(txt(window, 'kpi-peak'), '940 MB');
@@ -240,6 +248,44 @@ const txt = (w, id) => w.document.getElementById(id).textContent.trim();
   }
   emit('stage', { name: 'k6', status: 'done', code: 0 });
 
+  // Before the first request there is no statistic to name. Calling it
+  // cumulative made the label flip to rolling the moment load began, and the
+  // reference was briefly "not comparable" for no reason.
+  emit('stage', { name: 'k6', status: 'running', k: '2.0', seed: 2025, minutes: 3 });
+  emit('metrics', sample({ e2e_p95: null, rps: null }));
+  assert.strictEqual(Live.latency.source, 'none');
+  if (has('latency-note')) {
+    assert.match(txt(window, 'latency-note'), /waiting for the first requests/);
+    assert.doesNotMatch(txt(window, 'latency-note'), /not drawn/);
+  }
+  if (has('hero-p95-prev')) assert.doesNotMatch(txt(window, 'hero-p95-prev'), /not comparable/);
+  emit('stage', { name: 'k6', status: 'done', code: 0 });
+
+  // A run stopped in its first seconds still leaves a recording; as the
+  // reference it would draw nothing. The newest run WITH traffic is used.
+  const keptRuns = routes['/recordings'];
+  const emptyRun = 'SAMM-baseline-k2.0-s2025-empty.jsonl';
+  recordingText[emptyRun] = JSON.stringify({ event: 'metrics', data: { t: 1, up: true, rss_mb: 30, rps: null, e2e_p95: null } });
+  routes['/recordings'] = { recordings: [{ name: emptyRun, mode: 'baseline', k: '2.0', seed: 2025, mtime: 2 }, ...keptRuns.recordings] };
+  Live.ghost = null;
+  await Live.loadGhost();
+  assert.strictEqual(Live.ghost && Live.ghost.name, keptRuns.recordings[0].name, 'a recording without traffic must be skipped');
+  routes['/recordings'] = keptRuns;
+
+  // A page left open across a collector restart (a new replay) reconnects on
+  // its own, after the restarted collector's run-start event has gone out. The
+  // new session id in hello is what clears the old run.
+  emit('hello', { label: 'SAMM', session: 1 });
+  emit('metrics', sample({ e2e_p95_roll: 480, roll_window_s: 5 }));
+  assert.ok(Live.series.t.length > 0 && Live.hasRolling);
+  emit('hello', { label: 'SAMM', session: 2 });
+  assert.strictEqual(Live.series.t.length, 0, 'a new collector session must clear the old run');
+  assert.strictEqual(Live.latency.source, 'none');
+  emit('metrics', sample());
+  emit('hello', { label: 'SAMM', session: 2 });
+  assert.strictEqual(Live.series.t.length, 1, 'reconnecting to the same collector must keep the run');
+  await new Promise((r) => setTimeout(r, 20));      // the reset's status + reference refetch
+
   // ------------------------------------------ arenas come from the ML output
   const arenaText = txt(window, 'arena-content');
   for (const site of table.sites) {
@@ -290,6 +336,7 @@ const txt = (w, id) => w.document.getElementById(id).textContent.trim();
     mode: 'samm', label: 'SAMM', requests: 136246, throughput_rps: 718.3, dropped: 190,
     dropped_pct: 0.14, failed_pct: 0, e2e_p95: 812.4, e2e_p99: 3056.7, alloc_p95: 64.1,
     alloc_p99: 193.14, peak_rss_mb: 931.0, oom_kills: 0, container_survived: true,
+    avg_cpu_pct: 66.8, avg_mem_util_pct: 88.4, limit_mb: 1024,
     run: { k: '2.0', seed: 2025, minutes: 3 },
   });
   const final = txt(window, 'final-body');
@@ -302,6 +349,27 @@ const txt = (w, id) => w.document.getElementById(id).textContent.trim();
   assert.match(final, /136,246/);
   assert.match(final, /3056\.7 ms/, 'p99 should come from the end-of-run summary');
   assert.ok(!window.document.getElementById('final-modal').classList.contains('hidden'));
+  // Load-phase averages from the collector, and the peak as a share of the limit.
+  assert.match(final, /average CPU \(of 1 vCPU\)\s*66\.8%/);
+  assert.match(final, /average memory utilization\s*88\.4% of 1024 MB/);
+  assert.match(final, /peak RSS\s*931\.0 MB \(90\.9% of limit\)/);
+  assert.doesNotMatch(final, /from samples/);
+
+  // Summaries archived before the collector computed averages: the page uses
+  // its own load-phase samples (VUs > 0; k6's start-up idle is left out) and says so.
+  emit('stage', { name: 'k6', status: 'running', k: '2.0', seed: 2025, minutes: 3 });
+  emit('metrics', sample({ vus: 0, cpu_pct: 5, rss_mb: 100 }));
+  emit('metrics', sample({ cpu_pct: 90, rss_mb: 512 }));
+  emit('metrics', sample({ cpu_pct: 100, rss_mb: 768 }));
+  emit('final', {
+    mode: 'samm', label: 'SAMM', requests: 1, throughput_rps: 1, dropped: 0, dropped_pct: 0,
+    failed_pct: 0, e2e_p95: 1, e2e_p99: 1, alloc_p95: 1, alloc_p99: 1, peak_rss_mb: 768,
+    oom_kills: 0, container_survived: true,
+  });
+  const archived = txt(window, 'final-body');
+  assert.match(archived, /average CPU \(of 1 vCPU\)\s*95\.0% · from samples/);
+  assert.match(archived, /average memory utilization\s*62\.5% of 1024 MB · from samples/);
+  emit('stage', { name: 'k6', status: 'done', code: 0 });
 
   // ------------------------------------------------ the container dying
   emit('container', {

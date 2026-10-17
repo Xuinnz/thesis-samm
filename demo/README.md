@@ -34,8 +34,8 @@ supporting counters, with the routing table and allocator below the fold. The
 classic layout needs about 1,190 px for its three charts, so the third is always
 off-screen on a laptop.
 
-Both render from the same state and the same element ids, and each links to the
-other in its header. A panel that exists on only one of them is skipped by the
+Both render from the same state and the same element ids. `index.html` links
+to `v2.html` in its header; `v2.html` has no link back. A panel that exists on only one of them is skipped by the
 renderer, so either file can be deleted without touching the JavaScript. To make
 one the default, serve it as `/` by renaming.
 
@@ -68,14 +68,19 @@ one the default, serve it as `/` by renaming.
 - **Dropped** is the share of the whole run so far — dropped / (served +
   dropped), the ratio the run summary reports at the end — with the last
   second's ratio underneath. The per-second figure swings with every burst.
-- **Warmup** (`v2.html`, SAMM mode only) — restarts SAMM with its floors
-  pre-faulted (`SAMM_WARMUP`). Off by default, as in every benchmark. Measured
+- **Warmup** (no button on either page; `--warmup true` or `POST /warmup`) —
+  restarts SAMM with its floors pre-faulted (`SAMM_WARMUP`). Off by default, as
+  in every benchmark. Measured
   on a 1-minute k=1.0 run, it put idle RSS at 523 MB and held RSS against the
   1,024 MB limit for 39 s, where cold SAMM peaked at 926 MB. Warmed runs are
   labelled `-warm` in recordings, the history and the run summary, so they are
-  never compared as if they were cold. `--warmup true` sets the default. The dashed line is
-  the other mode's most recent recorded run, drawn against the same clock and
-  labelled as a recording. p99 is not available live; it appears in the
+  never compared as if they were cold. The dashed line is the other mode's most
+  recent recorded run that carried traffic (a run stopped in its first seconds
+  is skipped), drawn against the same clock and labelled as a recording. Until
+  the first request the latency note says "waiting for the first requests"
+  rather than naming a statistic. A page left open across a collector restart
+  (a new replay, say) clears its charts on reconnect: `hello` carries a session
+  id. p99 is not available live; it appears in the
   run-complete dialog, which reads k6's end-of-test summary.
 - **Arena panel** — one card per call-site from the compiled routing table:
   policy, lifespan, variance, and the arena's floor and span. Those sizes are

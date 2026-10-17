@@ -169,7 +169,7 @@ const Charts = {
     // cumulative.
     const lat = live.latency || { source: 'cumulative' };
     const rollingLive = lat.source === 'rolling';
-    const field = rollingLive ? 'p95r' : 'p95c';
+    const field = typeof Live !== 'undefined' ? Live.latencyField(live) : rollingLive ? 'p95r' : 'p95c';
     const entry = charts.latency;
     if (entry) {
       applyLabel(entry, modeLabel);
