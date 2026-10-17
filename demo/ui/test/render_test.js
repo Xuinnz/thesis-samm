@@ -145,6 +145,10 @@ const txt = (w, id) => w.document.getElementById(id).textContent.trim();
     assert.strictEqual(txt(window, 'hero-rss'), '931');
     assert.match(txt(window, 'hero-rss-limit'), /of 1024 MB/);
   }
+  // Memory utilization = RSS ÷ container limit (931 / 1024).
+  if (has('hero-rss-util')) {
+    assert.strictEqual(txt(window, 'hero-rss-util'), 'utilization 90.9%');
+  }
   assert.strictEqual(txt(window, 'kpi-cpu'), '67%');
   assert.strictEqual(txt(window, 'kpi-peak'), '940 MB');
   assert.strictEqual(txt(window, 'kpi-oom'), 'no OOM kills');
@@ -332,6 +336,7 @@ const txt = (w, id) => w.document.getElementById(id).textContent.trim();
     mode: 'samm', label: 'SAMM', requests: 136246, throughput_rps: 718.3, dropped: 190,
     dropped_pct: 0.14, failed_pct: 0, e2e_p95: 812.4, e2e_p99: 3056.7, alloc_p95: 64.1,
     alloc_p99: 193.14, peak_rss_mb: 931.0, oom_kills: 0, container_survived: true,
+    avg_cpu_pct: 66.8, avg_mem_util_pct: 88.4, limit_mb: 1024,
     run: { k: '2.0', seed: 2025, minutes: 3 },
   });
   const final = txt(window, 'final-body');
@@ -344,6 +349,27 @@ const txt = (w, id) => w.document.getElementById(id).textContent.trim();
   assert.match(final, /136,246/);
   assert.match(final, /3056\.7 ms/, 'p99 should come from the end-of-run summary');
   assert.ok(!window.document.getElementById('final-modal').classList.contains('hidden'));
+  // Load-phase averages from the collector, and the peak as a share of the limit.
+  assert.match(final, /average CPU \(of 1 vCPU\)\s*66\.8%/);
+  assert.match(final, /average memory utilization\s*88\.4% of 1024 MB/);
+  assert.match(final, /peak RSS\s*931\.0 MB \(90\.9% of limit\)/);
+  assert.doesNotMatch(final, /from samples/);
+
+  // Summaries archived before the collector computed averages: the page uses
+  // its own load-phase samples (VUs > 0; k6's start-up idle is left out) and says so.
+  emit('stage', { name: 'k6', status: 'running', k: '2.0', seed: 2025, minutes: 3 });
+  emit('metrics', sample({ vus: 0, cpu_pct: 5, rss_mb: 100 }));
+  emit('metrics', sample({ cpu_pct: 90, rss_mb: 512 }));
+  emit('metrics', sample({ cpu_pct: 100, rss_mb: 768 }));
+  emit('final', {
+    mode: 'samm', label: 'SAMM', requests: 1, throughput_rps: 1, dropped: 0, dropped_pct: 0,
+    failed_pct: 0, e2e_p95: 1, e2e_p99: 1, alloc_p95: 1, alloc_p99: 1, peak_rss_mb: 768,
+    oom_kills: 0, container_survived: true,
+  });
+  const archived = txt(window, 'final-body');
+  assert.match(archived, /average CPU \(of 1 vCPU\)\s*95\.0% · from samples/);
+  assert.match(archived, /average memory utilization\s*62\.5% of 1024 MB · from samples/);
+  emit('stage', { name: 'k6', status: 'done', code: 0 });
 
   // ------------------------------------------------ the container dying
   emit('container', {

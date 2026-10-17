@@ -25,6 +25,9 @@ const Live = {
   series: { t: [], rss: [], rps: [], p95r: [], p95c: [] },
   hasRolling: false, // has this run produced a rolling window yet?
   hasLatency: false, // ...or any p95 at all?
+  // Load-phase means (VUs > 0), for the run summary when the collector's own
+  // are missing: summaries archived before it computed them, replayed.
+  runStats: { cpuSum: 0, utilSum: 0, n: 0, limit: null },
   t0: null,
   ghost: null,        // the other mode's last recorded run
   stages: [],
@@ -170,6 +173,12 @@ function pushSample(s) {
       Live.rollWindow = s.roll_window_s;
     }
     if (s.e2e_p95 !== null && s.e2e_p95 !== undefined) Live.hasLatency = true;
+    if (s.vus > 0 && s.cpu_pct != null && s.rss_mb != null && s.limit_mb) {
+      Live.runStats.cpuSum += s.cpu_pct;
+      Live.runStats.utilSum += (100 * s.rss_mb) / s.limit_mb;
+      Live.runStats.n += 1;
+      Live.runStats.limit = s.limit_mb;
+    }
     // 'none' until the first request: before then there is no statistic to
     // name, and calling it cumulative made the label flip when load began.
     Live.latency = Live.hasRolling
@@ -234,6 +243,7 @@ function resetSeries() {
   Live.hasRolling = false;
   Live.hasLatency = false;
   Live.latency = { source: 'none', window_s: null };
+  Live.runStats = { cpuSum: 0, utilSum: 0, n: 0, limit: null };
 }
 Live.resetSeries = resetSeries;
 

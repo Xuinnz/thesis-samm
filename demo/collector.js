@@ -353,6 +353,9 @@ const { spawn, execFile } = require('child_process');
 
 let k6Proc = null;
 let activeRun = null;        // { id, mode, k, seed, minutes, file, startedAt, summary }
+// Averages for the run summary, over the samples taken while load was running
+// (VUs > 0, container up): k6's ~60 s start-up idle would otherwise drag them down.
+let runStats = null;         // { cpuSum, utilSum, n, limit }
 let switching = false;
 
 function sh(cmd, args) {
@@ -466,6 +469,7 @@ async function startRun({ k = RUN_DEFAULTS.k, seed = RUN_DEFAULTS.seed, minutes 
   fs.mkdirSync(RECORD_DIR, { recursive: true });
   const file = startRecording(id);
   activeRun = { id, mode: MODE, k, seed, minutes, file, warmup: warm, startedAt: Date.now() };
+  runStats = { cpuSum: 0, utilSum: 0, n: 0, limit: null };
 
   const tm = path.join(REPO, 'datasets/azure-trace-2019/processed/traffic-models');
   const env = {
@@ -512,9 +516,15 @@ async function startRun({ k = RUN_DEFAULTS.k, seed = RUN_DEFAULTS.seed, minutes 
     const run = activeRun;
     k6Proc = null; activeRun = null;
     emit('stage', { name: 'k6', status: code === 0 ? 'done' : 'stopped', code, id: run && run.id });
+    const stats = runStats;
+    runStats = null;
     if (summary) {
       const final = {
         ...summary,
+        // Means over the load phase (see runStats); null when no load sample was taken.
+        avg_cpu_pct: stats && stats.n ? +(stats.cpuSum / stats.n).toFixed(1) : null,
+        avg_mem_util_pct: stats && stats.n ? +(stats.utilSum / stats.n).toFixed(1) : null,
+        limit_mb: stats ? stats.limit : null,
         run,
         finished_at: new Date().toISOString(),
         recording: run && run.file ? path.basename(run.file) : null,
@@ -781,6 +791,12 @@ server.listen(PORT, () => {
     try {
       const s = await sample();
       emit('metrics', s);
+      if (runStats && k6Proc && s.up && s.vus > 0 && s.cpu_pct !== null && s.rss_mb !== null && s.limit_mb) {
+        runStats.cpuSum += s.cpu_pct;
+        runStats.utilSum += (100 * s.rss_mb) / s.limit_mb;
+        runStats.n += 1;
+        runStats.limit = s.limit_mb;
+      }
       if (wasUp && !s.up) emit('container', await postMortem(lastUp));
       wasUp = s.up;
       if (s.up) lastUp = s;

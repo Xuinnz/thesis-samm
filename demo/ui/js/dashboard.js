@@ -369,6 +369,13 @@ function renderHero(live) {
   const limit = s.limit_mb || 1024;
   text('hero-rss', s.rss_mb === null || s.rss_mb === undefined ? NA : Math.round(s.rss_mb));
   text('hero-rss-limit', `of ${limit} MB`);
+  // Memory utilization: the container's RSS as a share of its limit, coloured
+  // with the bar's thresholds so the two never disagree.
+  on('hero-rss-util', (el) => {
+    const util = s.rss_mb === null || s.rss_mb === undefined ? null : (100 * s.rss_mb) / limit;
+    el.textContent = util === null ? '' : `utilization ${util.toFixed(1)}%`;
+    el.style.color = util === null ? '' : util > 80 ? '#b91c1c' : util > 60 ? '#d97706' : '#64748b';
+  });
   const pastRss = past('rss');
   text('hero-rss-prev', prevLabel(pastRss === null ? null : Math.round(pastRss), ' MB'));
   on('hero-rss-bar', (bar) => {
@@ -707,6 +714,14 @@ function renderFinal(live) {
   if (!live.final || live.final._shown) return;
   live.final._shown = true;
   const f = live.final;
+  // Load-phase means: the collector's when the summary has them, else this
+  // page's own samples (summaries archived before the collector computed them).
+  const rs = live.runStats || { n: 0 };
+  const fromPage = (f.avg_cpu_pct === undefined || f.avg_cpu_pct === null) && rs.n > 0;
+  const avgCpu = f.avg_cpu_pct ?? (rs.n ? rs.cpuSum / rs.n : null);
+  const avgUtil = f.avg_mem_util_pct ?? (rs.n ? rs.utilSum / rs.n : null);
+  const limit = f.limit_mb ?? rs.limit ?? null;
+  const viaPage = fromPage ? ' · from samples' : '';
   const rows = [
     ['mode', f.mode === 'samm' ? `SAMM${f.run && f.run.warmup ? ' (warmup on)' : ''}` : 'V8 baseline'],
     ['load point', f.run ? `k = ${f.run.k}, seed ${f.run.seed}, ${f.run.minutes} min` : NA],
@@ -716,7 +731,9 @@ function renderFinal(live) {
     ['failed', pct(f.failed_pct)],
     ['end-to-end p95 / p99', `${f.e2e_p95 === null ? NA : f.e2e_p95.toFixed(1)} / ${f.e2e_p99 === null ? NA : f.e2e_p99.toFixed(1)} ms`],
     ['allocation p95 / p99', `${f.alloc_p95 === null ? NA : f.alloc_p95.toFixed(2)} / ${f.alloc_p99 === null ? NA : f.alloc_p99.toFixed(2)} ms`],
-    ['peak RSS', mb(f.peak_rss_mb, 1)],
+    ['average CPU (of 1 vCPU)', avgCpu === null ? NA : `${avgCpu.toFixed(1)}%${viaPage}`],
+    ['average memory utilization', avgUtil === null ? NA : `${avgUtil.toFixed(1)}%${limit ? ` of ${limit} MB` : ''}${viaPage}`],
+    ['peak RSS', `${mb(f.peak_rss_mb, 1)}${limit && f.peak_rss_mb ? ` (${((100 * f.peak_rss_mb) / limit).toFixed(1)}% of limit)` : ''}`],
     ['OOM kills', int(f.oom_kills)],
     ['container survived', f.container_survived ? 'yes' : 'no'],
   ];

@@ -83,10 +83,11 @@
       </div>
 
       <div class="rounded-2xl bg-white p-4 shadow-sm">
-        <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <p class="flex items-baseline justify-between text-xs font-semibold uppercase tracking-wide text-slate-500">
           <span class="metric-title group relative cursor-default outline-none" tabindex="0">Memory (RSS)
-            <span class="metric-tip pointer-events-none invisible absolute top-full left-0 z-50 mt-1 rounded-md bg-[#0b1428] text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Physical memory the process currently holds, against the container limit.</span>
+            <span class="metric-tip pointer-events-none invisible absolute top-full left-0 z-50 mt-1 rounded-md bg-[#0b1428] text-white opacity-0 shadow-sm transition-opacity group-hover:visible group-hover:opacity-100 group-focus:visible group-focus:opacity-100">Physical memory the process currently holds, against the container limit. Utilization = RSS ÷ container limit.</span>
           </span>
+          <span id="hero-rss-util" class="normal-case font-semibold tracking-normal tabular-nums"></span>
         </p>
         <p class="mt-1 flex items-baseline gap-2">
           <span id="hero-rss" class="text-5xl font-bold tabular-nums text-[#0b1428]">—</span>
