@@ -489,5 +489,7 @@ All of the above ran on the laptop (Ryzen 5 6600H, WSL2). It is pilot data now.
 - **Long jobs.** Run them detached (`setsid nohup ... &`) and watch the log;
   background tool calls die after about 30 min. `/tmp` is wiped when Windows or
   WSL restarts, so keep scripts in the repo.
-- **This branch is behind `main`.** It lacks 2ee8749 (demo fixes) and anything
-  committed on `main` since; run the demo from `main`, or merge `main` in first.
+- **Keep this branch in sync with `main`.** `main` was last merged in on
+  2026-10-17 (9ad1bbe, up to ef50811). When `main` moves on, merge it in
+  again (`git merge main` on this branch); never merge this branch into `main`
+  (it would be published on the next push).
