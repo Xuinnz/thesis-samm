@@ -44,7 +44,7 @@
  */
 
 import http from 'k6/http';
-import { Trend } from 'k6/metrics';
+import { Counter, Trend } from 'k6/metrics';
 import { sleep } from 'k6';
 import exec from 'k6/execution';
 import { SharedArray } from 'k6/data'; // <-- The memory savior
@@ -279,8 +279,27 @@ export const options = {
 
 const processingTime = new Trend('processing_time', true);
 
+// Requests whose duration came out SHORTER than the hold subtracted, clamped to
+// 0 in processing_time. Counted so their share is visible.
+const processingClamped = new Counter('processing_clamped');
+
+// What the server actually waits. The held routes (fetch, ingest, process) hold
+// with setTimeout(resolve, hold_ms), and Node truncates a non-integer delay to
+// whole milliseconds (and waits 1 ms for anything below 1). Subtracting the
+// fractional hold_ms that was SENT undercounted processing by up to 1 ms and
+// clamped fast requests to 0 (13-25 % of held requests at 160-320 req/s on
+// 2026-10-03). The same fix as internal-validation/k6-scenarios/lib/workload.js.
+// What remains is random and can't be corrected from the client: libuv keeps
+// time in whole milliseconds and the event loop can fire a timer late.
+function scheduledHoldMs(holdMs) {
+  const ms = Math.trunc(Number(holdMs));
+  return ms >= 1 && ms <= 2147483647 ? ms : 1;
+}
+
 function recordProcessing(res, holdMs) {
-  processingTime.add(Math.max(0, res.timings.duration - (holdMs || 0)));
+  const value = res.timings.duration - (holdMs ? scheduledHoldMs(holdMs) : 0);
+  if (value < 0) processingClamped.add(1);
+  processingTime.add(Math.max(0, value));
   return res;
 }
 

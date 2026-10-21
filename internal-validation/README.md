@@ -134,12 +134,12 @@ the next request (the coordinated-omission problem a closed loop has).
 
 **What's measured:** `processing_time` = `http_req_duration` − the artificial
 hold: the allocator's and server's own cost per request, without the simulated
-downstream wait. One deliberate departure from `samm-load-test.js`: the server
-holds with `setTimeout(resolve, hold_ms)`, and Node truncates fractional delays
-to whole milliseconds. Subtracting the fractional value k6 sent (as the
-original does) undercounts by up to 1 ms. In the 2026-10-03 run, 13–25% of held
+downstream wait. The server holds with `setTimeout(resolve, hold_ms)`, and Node
+truncates fractional delays to whole milliseconds. Subtracting the fractional
+value k6 sent undercounts by up to 1 ms. In the 2026-10-03 run, 13–25% of held
 requests at 160–320 req/s were clamped to 0 that way. This suite subtracts the
-delay Node actually schedules.
+delay Node actually schedules (`samm-load-test.js` does the same since
+2026-10-21).
 
 Some error can't be removed from the client. libuv keeps time in whole
 milliseconds, so a wait can start up to 1 ms before the call, and the event loop

@@ -13,7 +13,8 @@
  * Differences from the original:
  *   - processing_time subtracts the hold the server actually waits (Node
  *     truncates fractional setTimeout delays to whole ms), not the fractional
- *     value sent -- see scheduledHoldMs() below. The one change to the metric;
+ *     value sent -- see scheduledHoldMs() below. Introduced here first;
+ *     samm-load-test.js has had the same fix since 2026-10-21;
  *   - every request and processing_time sample carries tags (endpoint, plus
  *     whatever the scenario passes: phase, step, second), so analysis can
  *     split them;
@@ -170,12 +171,12 @@ export const processingClamped = new Counter('processing_clamped');
 // What the server actually waits. The held routes (fetch, ingest, process) hold
 // with setTimeout(resolve, hold_ms), and Node truncates a non-integer delay to
 // whole milliseconds (and waits 1 ms for anything below 1). k6 sends fractional
-// hold_ms values, so subtracting the value that was SENT -- as samm-load-test.js
-// does -- undercounts processing by up to 1 ms and clamps fast requests to 0:
-// 13-25 % of held requests at 160-320 req/s in the 2026-10-03 run.
+// hold_ms values, so subtracting the value that was SENT undercounts processing
+// by up to 1 ms and clamps fast requests to 0: 13-25 % of held requests at
+// 160-320 req/s in the 2026-10-03 run.
 //
-// DELIBERATE DEPARTURE from samm-load-test.js: subtract the delay Node actually
-// schedules. That removes the systematic part. What remains is random and cannot
+// So subtract the delay Node actually schedules (samm-load-test.js does the same
+// since 2026-10-21). That removes the systematic part. What remains is random and cannot
 // be corrected from the client: libuv keeps time in whole milliseconds, so a
 // wait can start up to 1 ms before setTimeout is called, and the event loop can
 // fire it late. Residual negatives are still clamped, and counted above.
