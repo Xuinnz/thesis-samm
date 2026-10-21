@@ -288,6 +288,31 @@ Go = SAMM clearly beats pooling AND the real workload shows a gain.
    fallbacks before an OOM. The laptop's 500-VU OOM came from fallback memory
    outside a full pool piling up while the CPU was saturated (GC lag); this is
    the mechanism that should prevent it.
+4. **Separate classification from sizing: two characterizations (user's
+   idea, 2026-10-21).** The thesis profiles once at k = 1.0 and sizes the pool
+   at the stress point with the two-pass β (runbook Phase 6). For the paper,
+   make the split explicit:
+   - **Classification** (Layers 1-2: escaping or request-scoped, bump or slab)
+     from an **uncontended** profile. At saturation, queueing stretches
+     request lifetimes and GC lag inflates overhang, so request-scoped sites can
+     look escaping; and the profiled server is the baseline, so its GC lag would
+     be baked into SAMM's inputs. Show this: classify from a profile taken at
+     saturation and count the misclassifications.
+   - **Sizing** (Layer 3: total ceiling and per-arena quotas) **at the target
+     load, measured with SAMM itself**. Compare three ways:
+     (a) measured: two-pass at the target load, extended from the total
+     ceiling to per-arena quotas with the live-bytes counter (B5);
+     (b) modelled: scale the k = 1.0 demand per site by the queueing delay
+     predicted from calibration (Little's Law: in flight = rate × (hold +
+     queueing); queueing from measured service-time mean and variance,
+     Kingman), with no second profile;
+     (c) adaptive: start from the k = 1.0 quotas and let B2.2-B2.3 adjust
+     them at runtime.
+     Metrics: fallback rate, outside-pool memory and OOM risk at the target
+     load and above it, and how far each is from the measured optimum.
+   - Low-overhead profiling (sampling allocations, as FiLiP does) could make a
+     second profile at higher load cheap, but GC lag still inflates overhang
+     there, so classification stays with the uncontended profile.
 Evaluate B2 under drift (endpoint mix shifting mid-run; d01-d07 → d08-d14
 traffic) and sustained overload (the 500-VU case).
 
