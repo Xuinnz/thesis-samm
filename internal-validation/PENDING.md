@@ -21,6 +21,25 @@ VM, the panel's additional results, the statistics, the write-up.
 
 ## A1. Final study on a dedicated-core cloud VM (GCP Tau T2D)
 
+**The runbook is `docs/vm-test-plan.md`** (phases 1-11: laptop prep, VM setup,
+health reference, characterization, finding the stress point, deriving β,
+microbenchmark, internal validation, the n = 100 main study, the panel's
+extras, statistics). Decisions locked on 2026-10-17:
+- **Main study (n = 100):** V8 on jemalloc vs SAMM on jemalloc (two-way).
+- **Internal validation:** all allocators (glibc, jemalloc, SAMM, plus the
+  variants when implemented).
+- **Load point:** profile at k = 1.0; find the VM's near-saturation stress
+  point first, then lock the main study to it (as the paper states). Still to
+  decide: the selection rule (recommended: highest k where the jemalloc
+  baseline is CPU-saturated but survives) and how to treat OOM-killed runs.
+- **Statistical metrics:** throughput = achieved req/s (k6 `http_reqs` rate,
+  as on the demo); latency = processing p99 (p95 reported too); peak memory =
+  cgroup `memory.peak`. All other dashboard metrics still collected.
+- **Model:** fix the Layer 1 System rule and derive β from data (A4).
+
+The steps below are the original outline; the runbook supersedes their order
+(notably: find the stress point, then derive β there, then freeze the table).
+
 Replaces the old laptop tasks (WSL clock, page-fault anomaly, reverse-order
 replicate). Internal validation runs on the VM too, and comes first, because it
 sets the operating point there. Order:
@@ -149,11 +168,18 @@ drift test.
    `-final.json`. They still show in History, and the UI test fixture picks the
    newest SAMM recording, so it falls back to synthetic data. Move or delete
    them: the user's call.
+8. **Apply the `processing_time` fix to
+   `load-generator/k6-scenarios/samm-load-test.js`** (subtract
+   `Math.trunc(hold_ms)`, count remaining clamps), as in
+   `internal-validation/k6-scenarios/lib/workload.js`. The earlier decision was
+   to do this only if the realistic benchmark is re-run; the main study re-runs
+   it, and processing p99 is now a statistical metric.
 
-## A4. Decisions before retraining on the VM
+## A4. Model fixes before retraining on the VM
 
-Fix now (they also feed Part B) or freeze the model and report as limitations.
-Either way decide before A1 step 3.
+**Decided 2026-10-17: fix both** (a) and (b). (a) is implemented on the laptop
+before profiling (runbook Phase 1); (b) is derived on the VM at the locked
+load point (runbook Phase 6), then the table is frozen.
 
 **(a) Layer 1's System rule (design limitation, found 2026-10-08).**
 `ml-refinery/policy-assignment/01_variance_threshold_policy.py` always sends
@@ -449,9 +475,14 @@ All of the above ran on the laptop (Ryzen 5 6600H, WSL2). It is pilot data now.
 - The probe's V8/GC limit stays two-sided (0.90-1.10x).
 - A failed probe means stop and report. No rebooting on my own, and no
   loosening a limit after seeing a result.
-- `load-generator/k6-scenarios/samm-load-test.js` stays untouched (apply the
-  timing fix there only if the realistic or gc-control benchmark is re-run
-  before submission). The ~2 ms alloc p95 figure is not cited in the paper.
+- `samm-load-test.js` gets the `processing_time` fix now (A3 item 8): its
+  condition ("only if the realistic benchmark is re-run") is met. The ~2 ms
+  alloc p95 figure from before is not cited in the paper.
+- Main study (2026-10-17): V8 on jemalloc vs SAMM on jemalloc, n = 100, paired
+  seeds, 10-minute runs, at the VM's near-saturation stress point (found first,
+  then locked). Statistical metrics: achieved throughput, processing p99, peak
+  RSS (`memory.peak`). Internal validation covers all allocators. Fix the
+  Layer 1 System rule and derive β from data. Runbook: `docs/vm-test-plan.md`.
 - No longer-timeout re-run of the 500-VU stats.
 - The internal-validation work is merged into `main` (2026-10-17); it was kept
   on a private branch until then.
