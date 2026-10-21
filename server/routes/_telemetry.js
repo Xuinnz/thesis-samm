@@ -27,13 +27,24 @@ const v8 = require('v8');
 const ENABLED = process.env.SAMM_TELEMETRY === 'true';
 const HEAP_SAMPLE_INTERVAL_MS = Number(process.env.SAMM_HEAP_SAMPLE_MS) || 1000;
 
-// Node's GC entry kinds, mapped to the names V8 uses for them.
+// Node's GC entry kinds, read from Node's own constants. Until 2026-10-21 this
+// was a hand-written table one bit off (2 = major, 4 = incremental, 8 = weakcb;
+// Node 22 has MINOR 1, MAJOR 4, INCREMENTAL 8, WEAKCB 16), so in every snapshot
+// recorded before then "incremental" counts major GCs and "weakcb" counts
+// incremental marking. Each major GC is also reported as its marking phase.
+const { constants: PERF } = require('perf_hooks');
 const GC_KIND_NAMES = {
-  1: 'minor',        // scavenge — cheap, frequent, young generation
-  2: 'major',        // mark-sweep-compact — the stop-the-world pauses that matter
-  4: 'incremental',  // incremental marking step
-  8: 'weakcb',       // weak callback processing
+  [PERF.NODE_PERFORMANCE_GC_MINOR]: 'minor',              // scavenge: young generation only
+  [PERF.NODE_PERFORMANCE_GC_MAJOR]: 'major',              // mark-sweep-compact: the whole heap
+  [PERF.NODE_PERFORMANCE_GC_INCREMENTAL]: 'incremental',  // incremental marking, ahead of a major GC
+  [PERF.NODE_PERFORMANCE_GC_WEAKCB]: 'weakcb',            // weak callback processing
 };
+
+// The GC entry's flags hint at why a collection ran (e.g. ALL_EXTERNAL_MEMORY,
+// FORCED), counted per kind.
+const GC_FLAG_NAMES = Object.entries(PERF)
+  .filter(([name, bit]) => name.startsWith('NODE_PERFORMANCE_GC_FLAGS_') && bit > 0)
+  .map(([name, bit]) => [bit, name.slice('NODE_PERFORMANCE_GC_FLAGS_'.length).toLowerCase()]);
 
 const gc = {
   count: 0,
@@ -67,10 +78,14 @@ function recordGcEntry(entry) {
   if (ms > gc.maxPauseMs) gc.maxPauseMs = ms;
   gc.pauses.push(ms);
 
-  const bucket = gc.byKind[kind] || (gc.byKind[kind] = { count: 0, totalMs: 0, maxMs: 0 });
+  const bucket = gc.byKind[kind] || (gc.byKind[kind] = { count: 0, totalMs: 0, maxMs: 0, flags: {} });
   bucket.count += 1;
   bucket.totalMs += ms;
   if (ms > bucket.maxMs) bucket.maxMs = ms;
+  const flags = (entry.detail && entry.detail.flags) || 0;
+  for (const [bit, name] of GC_FLAG_NAMES) {
+    if (flags & bit) bucket.flags[name] = (bucket.flags[name] || 0) + 1;
+  }
 }
 
 function sampleHeap() {
@@ -139,6 +154,10 @@ function snapshot() {
       p95PauseMs: round(percentile(sorted, 0.95)),
       p99PauseMs: round(percentile(sorted, 0.99)),
       maxPauseMs: round(gc.maxPauseMs),
+      // Marks snapshots whose byKind names come from Node's constants. Older
+      // snapshots lack it: their "incremental" is major GCs, their "weakcb"
+      // incremental marking (see GC_KIND_NAMES).
+      kindLabels: 'node-constants',
       byKind: gc.byKind,
     },
     heap: {
