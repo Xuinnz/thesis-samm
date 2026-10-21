@@ -43,18 +43,35 @@ K6_SCENARIO_FILE="samm-load-test.js"
 BASE_URL="${BASE_URL:-http://localhost:3000}"
 HEALTH_URL="$BASE_URL/health"
 
-# k6 traffic parameters — override via env var. Defaults reflect the
-# values validated through pilot testing (0% http_req_failed, low
-# dropped_iterations) documented in the methodology.
+# k6 traffic parameters — override via env var. The defaults are the k = 1.0
+# load the routing table is trained at (the 2026-09-19 profile). MAX_RPS and
+# the hold scaling for LOAD_K come from demo/loads.js, the repo's load table.
+# The old standalone defaults profiled the wrong workload: 50 req/s, the
+# compose file's HOLD_SCALE 1, the server's 32 MiB process cap, and a
+# 5,000-object profiler that silently drops records.
+LOAD_K="${LOAD_K:-1.0}"
+read -r LOAD_MAX_RPS LOAD_HOLD_SCALE LOAD_PROCESS_HOLD_MS < <(node -e '
+  const { LOAD } = require(process.argv[1]);
+  const L = LOAD[process.argv[2]];
+  if (!L) { console.error("LOAD_K must be one of " + Object.keys(LOAD).join(", ")); process.exit(1); }
+  console.log(L.MAX_RPS, L.HOLD_SCALE, L.PROCESS_HOLD_MS);
+' "$REPO_ROOT/demo/loads.js" "$LOAD_K") || exit 2
 MIN_RPS="${MIN_RPS:-5}"
-MAX_RPS="${MAX_RPS:-50}"
-SIMULATION_MINUTES="${SIMULATION_MINUTES:-20}"
-PRE_ALLOCATED_VUS="${PRE_ALLOCATED_VUS:-50}"
-MAX_VUS="${MAX_VUS:-200}"
-# Optional fixed seed for the Markov walk. Left unset by default (fresh
-# random walk each run); the pipeline sets it so a characterization pass
-# is reproducible.
-SCHEDULE_SEED="${SCHEDULE_SEED:-}"
+MAX_RPS="${MAX_RPS:-$LOAD_MAX_RPS}"
+SIMULATION_MINUTES="${SIMULATION_MINUTES:-10}"
+PRE_ALLOCATED_VUS="${PRE_ALLOCATED_VUS:-400}"
+MAX_VUS="${MAX_VUS:-1400}"
+# Exported: docker compose hands them to the server (and so to its workload
+# manifest), and k6 receives the holds explicitly below.
+export HOLD_SCALE="${HOLD_SCALE:-$LOAD_HOLD_SCALE}"
+export PROCESS_HOLD_MS="${PROCESS_HOLD_MS:-$LOAD_PROCESS_HOLD_MS}"
+export PROCESS_MAX_BYTES="${PROCESS_MAX_BYTES:-16777216}"
+# batch.js issues ~200 allocations per request, so concurrent tracked objects
+# run into the thousands; an undersized profiler drops records silently.
+export SHADOW_PROFILER_CAPACITY="${SHADOW_PROFILER_CAPACITY:-150000}"
+# Fixed seed so a characterization pass is reproducible (the pipeline's
+# CHARACTERIZATION_SEED). SCHEDULE_SEED= (set but empty) gives a fresh walk.
+SCHEDULE_SEED="${SCHEDULE_SEED-19870601}"
 
 # Data paths fed to the k6 scenario's __ENV overrides.
 MARKOV_MATRIX_PATH="${MARKOV_MATRIX_PATH:-../../datasets/azure-trace-2019/processed/traffic-models/markov_transition_matrix.csv}"
@@ -167,11 +184,13 @@ fi
 # ---------------------------------------------------------------------
 # 5. Run k6
 # ---------------------------------------------------------------------
-log "Step 5/7: Running k6 (${SIMULATION_MINUTES} minutes, MAX_RPS=${MAX_RPS})..."
+log "Step 5/7: Running k6 (${SIMULATION_MINUTES} minutes, LOAD_K=${LOAD_K}: MAX_RPS=${MAX_RPS}, HOLD_SCALE=${HOLD_SCALE}, PROCESS_HOLD_MS=${PROCESS_HOLD_MS}, VUs ${PRE_ALLOCATED_VUS}/${MAX_VUS}, seed ${SCHEDULE_SEED:-random})..."
 (
     cd "$K6_SCENARIO_DIR"
     k6 run \
         -e BASE_URL="$BASE_URL" \
+        -e HOLD_SCALE="$HOLD_SCALE" \
+        -e PROCESS_HOLD_MS="$PROCESS_HOLD_MS" \
         -e MARKOV_MATRIX_PATH="$MARKOV_MATRIX_PATH" \
         -e TRAFFIC_SERIES_PATH="$TRAFFIC_SERIES_PATH" \
         -e JITTER_PARAMS_PATH="$JITTER_PARAMS_PATH" \

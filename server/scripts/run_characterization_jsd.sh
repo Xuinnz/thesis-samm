@@ -46,10 +46,23 @@ JSD_MONITOR_SCRIPT="$SCRIPT_DIR/jsd_convergence_monitor.py"
 BASE_URL="${BASE_URL:-http://localhost:3000}"
 HEALTH_URL="$BASE_URL/health"
 
+# Defaults are the k = 1.0 training load, as in run_characterization.sh (see
+# its comment for why the old 50 req/s defaults profiled the wrong workload).
+LOAD_K="${LOAD_K:-1.0}"
+read -r LOAD_MAX_RPS LOAD_HOLD_SCALE LOAD_PROCESS_HOLD_MS < <(node -e '
+  const { LOAD } = require(process.argv[1]);
+  const L = LOAD[process.argv[2]];
+  if (!L) { console.error("LOAD_K must be one of " + Object.keys(LOAD).join(", ")); process.exit(1); }
+  console.log(L.MAX_RPS, L.HOLD_SCALE, L.PROCESS_HOLD_MS);
+' "$REPO_ROOT/demo/loads.js" "$LOAD_K") || exit 2
 MIN_RPS="${MIN_RPS:-5}"
-MAX_RPS="${MAX_RPS:-50}"
-PRE_ALLOCATED_VUS="${PRE_ALLOCATED_VUS:-50}"
-MAX_VUS="${MAX_VUS:-200}"
+MAX_RPS="${MAX_RPS:-$LOAD_MAX_RPS}"
+PRE_ALLOCATED_VUS="${PRE_ALLOCATED_VUS:-400}"
+MAX_VUS="${MAX_VUS:-1400}"
+export HOLD_SCALE="${HOLD_SCALE:-$LOAD_HOLD_SCALE}"
+export PROCESS_HOLD_MS="${PROCESS_HOLD_MS:-$LOAD_PROCESS_HOLD_MS}"
+export PROCESS_MAX_BYTES="${PROCESS_MAX_BYTES:-16777216}"
+export SHADOW_PROFILER_CAPACITY="${SHADOW_PROFILER_CAPACITY:-150000}"
 
 # k6's own duration here is a BACKSTOP, not the intended stop
 # condition — the JSD monitor is expected to trigger shutdown well
@@ -146,6 +159,8 @@ log "Step 5/8: Starting k6 in the background (backstop duration: ${BACKSTOP_MINU
     cd "$K6_SCENARIO_DIR"
     exec timeout "${BACKSTOP_MINUTES}m" k6 run \
         -e BASE_URL="$BASE_URL" \
+        -e HOLD_SCALE="$HOLD_SCALE" \
+        -e PROCESS_HOLD_MS="$PROCESS_HOLD_MS" \
         -e MARKOV_MATRIX_PATH="$MARKOV_MATRIX_PATH" \
         -e TRAFFIC_SERIES_PATH="$TRAFFIC_SERIES_PATH" \
         -e JITTER_PARAMS_PATH="$JITTER_PARAMS_PATH" \

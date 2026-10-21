@@ -40,8 +40,8 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # =====================================================================
 export MIN_RPS="${MIN_RPS:-5}"
 export MAX_RPS="${MAX_RPS:-500}"
-export PRE_ALLOCATED_VUS="${PRE_ALLOCATED_VUS:-250}"
-export MAX_VUS="${MAX_VUS:-600}"
+export PRE_ALLOCATED_VUS="${PRE_ALLOCATED_VUS:-400}"
+export MAX_VUS="${MAX_VUS:-1400}"
 
 CHARACTERIZATION_MINUTES="${CHARACTERIZATION_MINUTES:-10}"
 BENCHMARK_MINUTES="${BENCHMARK_MINUTES:-10}"
@@ -53,7 +53,7 @@ BENCHMARK_SEED="${BENCHMARK_SEED:-20250911}"
 # run into the thousands at this RPS. Undersized capacity drops records
 # silently (one stderr warning, then nothing), which would quietly bias the
 # training data toward whatever survived.
-export SHADOW_PROFILER_CAPACITY="${SHADOW_PROFILER_CAPACITY:-100000}"
+export SHADOW_PROFILER_CAPACITY="${SHADOW_PROFILER_CAPACITY:-150000}"
 
 # Container environment for the benchmark stage: 1GB, swap off, 1 vCPU.
 export MEM_LIMIT="${MEM_LIMIT:-1024m}"
