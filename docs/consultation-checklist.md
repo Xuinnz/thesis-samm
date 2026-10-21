@@ -654,8 +654,8 @@ gives every metric; a second, instrumented pass gives the GC numbers only.
 | JS heap peak used (limit 524 MB) | 14.9 MB | 14.8 MB | 15.5 MB |
 | External memory at the end | 398 MB | 377 MB | **111 MB** |
 
-GC labels: the server's telemetry (`server/routes/_telemetry.js`) maps
-Node's GC kinds one bit off. Its "incremental" (kind 4) is really the major
+GC labels: until 2026-10-21 the server's telemetry (`server/routes/_telemetry.js`)
+mapped Node's GC kinds one bit off (fixed in f0f8cff). Its "incremental" (kind 4) is really the major
 GC (mark-sweep-compact) and its "weakcb" (kind 8) is incremental marking (Node
 22: minor 1, major 4, incremental 8, weakcb 16). Each major cycle is reported
 twice (marking + the major pause), so total = minor + 2 × major cycles:

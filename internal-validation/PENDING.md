@@ -125,12 +125,12 @@ drift test.
 
 ## A3. Fixes before the VM profiling run (cheap)
 
-1. **`server/scripts/run_characterization.sh` defaults do not match the real
+1. **Done 2026-10-21 (fe5259e).** **`server/scripts/run_characterization.sh` defaults did not match the real
    profiling run.** Run on its own it uses 50 req/s, 50-200 VUs and 20 min. The
    trace was made through `run_full_pipeline.sh` at k = 1.0: MAX_RPS 500,
    400-1,400 VUs, HOLD_SCALE 4, PROCESS_HOLD_MS 600, 10 min, seed 19870601.
    Align the defaults or make it refuse to run without them.
-2. **[review] Fix the GC kind labels** (found 2026-10-15). In
+2. **Done 2026-10-21 (f0f8cff): telemetry now names kinds from Node's constants, marks snapshots `kindLabels: 'node-constants'`, and counts GC flags; gc-control's analysis, summary and README corrected locally (`benchmark-results/` is gitignored).** Fix the GC kind labels (found 2026-10-15). In
    `server/routes/_telemetry.js`, `GC_KIND_NAMES` is one bit off from Node's
    constants (Node 22: MINOR 1, MAJOR 4, INCREMENTAL 8, WEAKCB 16; the file has
    2 = major, 4 = incremental, 8 = weakcb). So every "incremental" count so far
@@ -168,7 +168,7 @@ drift test.
    `-final.json`. They still show in History, and the UI test fixture picks the
    newest SAMM recording, so it falls back to synthetic data. Move or delete
    them: the user's call.
-8. **Apply the `processing_time` fix to
+8. **Done 2026-10-21 (dd07800).** **Apply the `processing_time` fix to
    `load-generator/k6-scenarios/samm-load-test.js`** (subtract
    `Math.trunc(hold_ms)`, count remaining clamps), as in
    `internal-validation/k6-scenarios/lib/workload.js`. The earlier decision was
