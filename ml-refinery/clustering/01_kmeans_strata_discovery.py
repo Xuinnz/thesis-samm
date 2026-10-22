@@ -1,8 +1,8 @@
 # This file is the K-Means Clustering Algorithm. 
 # It clusters the callsites depending on their overhang_log
 # to separate the callsites which is request-scope and escaping
-# We use the discrete second derivative to check the optimal numbers of cluster
-# current minimum strata enforced is 3 (might need to be defended first, will probably change later)
+# K is fixed at 2 (request-scoped vs escaping). The discrete second derivative
+# (elbow) is still computed and reported, but it no longer picks K.
 # This is an unsupervised Machine Learning.
 # INPUT: call_site_features_log_transformed.csv
 # OUTPUT: The callsites as well as their cluster ID.
@@ -14,8 +14,21 @@ import os
 import time
 import json
 
-# Minimum clusters of 3 for (Short, Medium, Long)
-MIN_TEMPORAL_STRATA = 3
+# Two strata: request-scoped and escaping. Layer 1 makes one decision per
+# call-site -- managed by an arena, or left to the System heap -- so a third
+# cluster only moved the boundary of that decision without adding one (the old
+# floor of 3, for Short/Medium/Long, was a lifetime scale the allocator never
+# acted on).
+#
+# LIMITATION: k-means always returns two groups, and the policy step always
+# sends the higher one to System. That is right only when a workload has both
+# kinds of call-site. If every call-site is request-scoped, the ones with the
+# most overhang still go to System and are lost to the allocator; if every
+# call-site escapes, the ones with the least overhang are still managed, and
+# their bytes are reclaimed while something still holds them. The oracle run
+# (stats-eval/oracle) measures each call-site's real reachability after its
+# request ends, which is how either failure would show up.
+TEMPORAL_STRATA = 2
 
 INPUT_PATH = "../../datasets/shadow-telemetry/intermediate/step6-log-transformation/call_site_features_log_transformed.csv"
 OUTPUT_DIR = "../../datasets/shadow-telemetry/intermediate/ml-refinery"
@@ -120,34 +133,20 @@ def discover_strata():
     if second_derivatives:
         print(f"\nWCSS''(K) — discrete second derivative (selectable range: K=2..{max_k - 1}):")
         for k, d2 in second_derivatives.items():
-            marker = "  <- selected" if k == best_k else ""
+            marker = "  <- elbow" if k == best_k else ""
             print(f"  K={k}: WCSS''={d2:.4f}{marker}")
-    print(f"\nOptimal K (argmax WCSS''): K = {best_k}")
+    print(f"\nElbow (argmax WCSS''): K = {best_k}  (reported only; K is fixed)")
 
-    # Floor the elbow's answer at the number of strata the architecture is
-    # defined around: Short / Medium / Long.
-    #
-    # The elbow is still computed and still reported -- it chooses K whenever it
-    # asks for 3 or more. But with one data point per call-site the 1->2 WCSS
-    # drop dominates by construction, so it reliably returns K=2, and K=2 merges
-    # the Medium-lived call-sites into the same cluster as the genuinely
-    # persistent ones. Everything in the top cluster is then classified System,
-    # which removes it from the allocator AND inflates the System reservation
+    # The elbow is advisory. With one data point per call-site the 1->2 WCSS
+    # drop dominates by construction, so it nearly always says K=2 anyway; it is
+    # kept in the metadata so a workload where it disagrees is visible.
     elbow_k = best_k
-    min_k = min(MIN_TEMPORAL_STRATA, len(df))
-    if best_k < min_k:
-        print(f"Raising K from {best_k} to the {min_k}-stratum minimum "
-              f"(Short/Medium/Long); the elbow is advisory below that.")
-        best_k = min_k
+    best_k = min(TEMPORAL_STRATA, len(df))
+    print(f"Using K = {best_k} (request-scoped / escaping)")
 
-    # Manual override. The elbow heuristic is computed over very few points (one
-    # per call-site), where the 1->2 drop always dominates and K=2 wins almost by
-    # construction. K=2 collapses Medium-lived call-sites into the same stratum
-    # as the genuinely persistent ones, and everything in the highest cluster is
-    # then classified System -- which removes it from the allocator entirely and
-    # inflates the System reservation until no pool is left. Set SAMM_KMEANS_K to
-    # pin the number of temporal strata (the architecture describes three:
-    # Short/Medium/Long).
+    # Manual override, for experiments with more strata. Only the top cluster
+    # becomes System, so a larger K moves the System boundary upward rather than
+    # adding a new kind of decision.
     forced_k = os.environ.get("SAMM_KMEANS_K")
     if forced_k:
         requested = int(forced_k)
@@ -156,7 +155,7 @@ def discover_strata():
                 f"ERROR: SAMM_KMEANS_K={requested} is outside 1..{len(df)} "
                 f"(there are only {len(df)} call-sites to cluster).")
         if requested != best_k:
-            print(f"OVERRIDE: SAMM_KMEANS_K={requested} (elbow had chosen K={best_k})")
+            print(f"OVERRIDE: SAMM_KMEANS_K={requested} (default is K={best_k})")
         best_k = requested
 
     # Retrain with the final model
@@ -197,8 +196,8 @@ def discover_strata():
             "selected_k": best_k,
             "clustering_feature": feature,
             "elbow_k": elbow_k,
-            "min_temporal_strata": MIN_TEMPORAL_STRATA,
-            "k_source": "SAMM_KMEANS_K override" if os.environ.get("SAMM_KMEANS_K") else "elbow",
+            "temporal_strata": TEMPORAL_STRATA,
+            "k_source": "SAMM_KMEANS_K override" if os.environ.get("SAMM_KMEANS_K") else "fixed",
         }, f, indent=4)  # indent=4 adds spacing to make it readable for humans
 
     elapsed = time.time() - start_time

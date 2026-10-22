@@ -81,8 +81,9 @@ def assign_policies():
 
     # Identify the cluster with the highest average lifespan
     # It will be designated as System heap
-    # TODO: Flagging this because we only flag out the highest lifespan
-    # In cases where there's multiple persistent or no persistent at all. This would be bad
+    # LIMITATION (see TEMPORAL_STRATA in the clustering step): the top cluster
+    # is System even when nothing really escapes, and the bottom one is managed
+    # even when everything does. The oracle run checks it against reachability.
     system_cluster_id = cluster_means.idxmax()
 
     print(
