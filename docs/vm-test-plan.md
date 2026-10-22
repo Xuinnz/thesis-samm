@@ -18,7 +18,7 @@ results.
 | **Internal validation** | **All allocators**: glibc, jemalloc, SAMM. Plus the variants when implemented: page-keeping jemalloc, SAMM with `dontneed`, `glibc-tuned`, app-level Buffer pooling. |
 | **Load point** | Profile and train at **k = 1.0**. **Find the VM's near-saturation stress point first** (Phase 5), then lock the main study to it, as the paper states. |
 | **Statistical metrics** (per run) | **Throughput:** achieved req/s (k6 `http_reqs` rate, the demo's number). **Latency:** processing time **p99** (report p95 too). **Peak memory:** peak RSS (cgroup `memory.peak`, reset at run start, the demo's number). Everything else on the dashboard is still collected. `_bench-lib.sh` / `run_replicates.sh` already use these definitions. |
-| **Model changes** | **Fix** Layer 1's System rule, and **derive β from data** at the locked load point (two-pass). |
+| **Model changes** | Layer 1 **fixed at K = 2** with its limitation stated (2026-10-22), checked against the **reachability oracle** (Phase 4); **derive β from data** at the locked load point (two-pass). |
 | **Timing fix** | Apply the `processing_time` fix to `samm-load-test.js` now: the earlier decision was "only if the realistic benchmark is re-run", and it will be. |
 
 **Throughput, two meanings:** *achieved* = requests completed per second under
@@ -46,10 +46,10 @@ it mostly reflects capacity.
 1. **PENDING A3 fixes:** `run_characterization.sh` defaults (k = 1.0 values),
    GC kind labels, the Phase 2 banner, stale floor comments, the output-folder
    rename, the two tooltips, the empty Oct 8 recordings.
-2. **Layer 1 System rule:** decide System by a significant natural break in
-   log-overhang (allowing zero or several System clusters); re-check the K ≥ 3
-   floor; fix the wording claiming misroutes fail loudly (`addon.zig`, the demo's
-   Layer 1 card). Update tests.
+2. **Layer 1:** done 2026-10-22: K fixed at 2 (be17915) and the reachability
+   oracle with its matrix analysis (77fc827). Left: fix the wording claiming
+   misroutes fail loudly (`addon.zig`, the demo's Layer 1 card). The
+   natural-break rule moved to ISMM (PENDING B3).
 3. **β from data:** a helper that reads a SAMM run (with `POLL_SAMM_STATS=1`)
    and reports peak memory outside the pool (RSS − committed), then the
    ceiling C = 1024 − that peak − 32 MB and β = C ÷ 836 MB. The quota script
@@ -100,7 +100,7 @@ it mostly reflects capacity.
    MAX_RPS 500, VUs 400 / 1,400, HOLD_SCALE 4, PROCESS_HOLD_MS 600, 10 min,
    seed 19870601, `SHADOW_PROFILER_CAPACITY` 150000. Optionally confirm
    convergence (`run_characterization_jsd.sh`).
-3. Phase 2 preprocessing → ML refinery (**with the new Layer 1 rule**, β still
+3. Phase 2 preprocessing → ML refinery (**Layer 1 at K = 2**, β still
    0.75 for now) → table compiler → `zig build test`. **Restore the workload
    fingerprint** afterwards (`run_tests.sh` overwrites it). Rebuild the SAMM
    image.
@@ -108,6 +108,14 @@ it mostly reflects capacity.
    rates; endpoint mix; per-site sizes, lifetimes and overhang; requests in
    flight (laptop: median 305, max 390); clusters, policies, quotas; a sanity
    comparison with the laptop (sizes should match, timings will differ).
+5. **Layer 1 ground truth (reachability oracle).** With the new table,
+   `server/scripts/run_oracle.sh` twice: the characterization seed (19870601,
+   the default) and a held-out seed (`SCHEDULE_SEED=2025
+   ORACLE_LABEL=seed2025-gc10ms`); then `oracle_matrix.py` with both run
+   folders for the cross-run table. About 10 min each. Not a performance run
+   (forced GCs every 10 ms), so no probe gate. β does not change Layer 1's
+   decisions; re-run only if Phase 6 changes a policy. Thesis output: the
+   per-site table, the weighted matrix, the sensitivity table.
 
 ## Phase 5: find the near-saturation stress point (about a day)
 
@@ -174,8 +182,8 @@ All allocators (glibc, jemalloc, SAMM; plus the variants if ready), final table:
 `stats-eval`: Shapiro-Wilk and Levene, then t-test or Mann-Whitney, or the
 **paired** versions (paired t / Wilcoxon signed-rank), since seeds are paired;
 Bonferroni across the three metrics (α ≈ 0.017); effect sizes and confidence
-intervals; survival rate if any run was killed; the misclassification matrix;
-figures.
+intervals; survival rate if any run was killed; the Layer 1 oracle matrix
+(Phase 4 step 5); figures.
 
 ---
 

@@ -35,7 +35,8 @@ extras, statistics). Decisions locked on 2026-10-17:
 - **Statistical metrics:** throughput = achieved req/s (k6 `http_reqs` rate,
   as on the demo); latency = processing p99 (p95 reported too); peak memory =
   cgroup `memory.peak`. All other dashboard metrics still collected.
-- **Model:** fix the Layer 1 System rule and derive β from data (A4).
+- **Model:** Layer 1 fixed at K = 2 with its limitation stated, checked
+  against the reachability oracle; derive β from data (A4).
 
 The steps below are the original outline; the runbook supersedes their order
 (notably: find the stress point, then derive β there, then freeze the table).
@@ -179,12 +180,14 @@ drift test.
 
 **Decided 2026-10-17: fix both** (a) and (b). (a) is implemented on the laptop
 before profiling (runbook Phase 1); (b) is derived on the VM at the locked
-load point (runbook Phase 6), then the table is frozen.
+load point (runbook Phase 6), then the table is frozen. **2026-10-22: (a) is
+fixed as K = 2 plus a stated limitation instead of the natural break (which
+moves to B3).**
 
 **(a) Layer 1's System rule (design limitation, found 2026-10-08).**
 `ml-refinery/policy-assignment/01_variance_threshold_policy.py` always sends
 exactly one cluster to System, the one with the highest mean overhang (its own
-TODO says so). Simulated with the real k-means settings:
+TODO said so). Simulated with the real k-means settings:
 - with only request-scoped sites, process, ingest and fetch (24-25 ms) would go
   to System (safe, but a lost optimization);
 - with escaping sites at 1 s and 10 s, the K>=3 floor splits them and the 1 s
@@ -192,13 +195,41 @@ TODO says so). Simulated with the real k-means settings:
 A misrouted escaping buffer is NOT memory corruption, because detach cuts off
 access, but the data is silently lost: a detached Buffer reads `length 0`,
 `toString() ""`, `write()` returns 0; only bounds-checked reads such as
-`readUInt8` throw. Fix: decide System by a significant natural break in
-log-overhang (above the largest gap, if it clearly exceeds GC delay), allowing
-zero or several System clusters; re-check whether the K>=3 floor is still
-needed. Also correct the wording that claims misroutes surface loudly:
+`readUInt8` throw.
+
+**Done 2026-10-22 (be17915): K fixed at 2** (request-scoped / escaping) in
+`ml-refinery/clustering/01_kmeans_strata_discovery.py`. The elbow is still
+computed and stored (`elbow_k`); the K >= 3 floor is gone; `SAMM_KMEANS_K`
+still overrides. On the current trace K = 2 assigns the same policies as K = 3
+(only aggregate is System), so the committed outputs and table stay until the
+VM retrain. **Limitation to state in the thesis:** k-means always returns two
+groups and the top one is always System, which is right only when a workload
+has both kinds. All request-scoped → the sites with the most overhang still go
+to System (lost gain); all escaping → the ones with the least are still
+managed (their data is lost on reuse). The natural-break rule (zero or several
+System clusters) is now ISMM work (B3).
+
+**Still to do:** correct the wording that claims misroutes surface loudly:
 `zig-allocator/src/node-api-interface/addon.zig` (REGIONS block,
 `reclaimEntry`), and the demo's Layer 1 card ("safety net held") and its
 comment in `renderValidation` (`demo/ui/js/dashboard.js`).
+
+**Ground truth for Layer 1: the reachability oracle (done 2026-10-22,
+77fc827).** Blackburn-style (pretenuring for Java): `SAMM_ORACLE=true` on the
+baseline image (profiler off) keeps a WeakRef per Buffer and forces a full GC
+every 10 ms, so each Buffer's death is bracketed relative to its request's end.
+`server/scripts/run_oracle.sh` (k = 1.0 workload at MAX_RPS 100, 5 min) runs
+it, then `stats-eval/matrix-validation/oracle_matrix.py` scores the table:
+good (managed, request-scoped) / bad (managed, escaped: brief < 1 s, long) /
+neutral (System: missed gain or correct), weighted by Buffers, bytes and
+byte-seconds; per call site; sensitivity to the slack δ (default 50 ms) and to
+a coarser GC cadence (replayed offline); agreement across runs. Reachable is
+not the same as used, so "bad" is an upper bound on harm (the use counter is
+B3). Laptop smoke only (1 min, 4,643 requests, 200,057 Buffers, GC gap p50
+13.7 ms): every managed site ≥ 99.8 % request-scoped by bytes (the rest
+ambiguous at δ = 50 ms), aggregate escaping (seen alive up to 13.8 s after its
+request); bytes: good 95.3 %, bad 0 %, missed 0 %, correct 4.6 %. The real
+runs are runbook Phase 4 step 5.
 
 **(b) Layer 3: a data-derived pool ceiling instead of β = 0.75** (user's idea,
 2026-10-08). β covers the fallback path: refused managed allocations go to
@@ -222,8 +253,9 @@ retraining and re-benchmarking; do it on the VM.
 `stats-eval/` holds only `.gitkeep` (user's decision: after the runs). The
 README promises Shapiro-Wilk and Levene, then a t-test or Mann-Whitney U, with
 Bonferroni-adjusted alpha = 0.017 across the three metrics, plus the
-misclassification matrix (ML assignment vs compiled routing table; 6 of 6 on
-the diagonal for the current table). Consider (ask the adviser): the same seed
+misclassification matrix. The README's version (ML assignment vs compiled
+routing table; 6 of 6 on the diagonal) only checks the compiler; the oracle
+matrix (A4(a), runbook Phase 4) is the accuracy test. Consider (ask the adviser): the same seed
 per pair makes it a paired design (paired t / Wilcoxon signed-rank); report
 effect sizes and confidence intervals; a second baseline doubles the
 comparisons (alpha ≈ 0.008).
@@ -325,6 +357,22 @@ traffic) and sustained overload (the 500-VU case).
   (request-scoped vs escaping); cost of each misprediction (data lost, memory);
   stability of the System rule (natural break) and of K.
 - Compare against fixed thresholds: does learning add anything?
+- **Ground truth already exists for Layer 1:** the reachability oracle (A4(a)).
+  Run it on the held-out inputs above; `oracle_matrix.py` takes several runs
+  and reports per-site agreement.
+- **Harm tier (user's idea, 2026-10-22):** a use-after-reclaim counter in a
+  SAMM run: count accesses to a managed Buffer after its region closed (a
+  detached Buffer reads empty, so this needs explicit instrumentation). Splits
+  the oracle's "bad" into critical (used after reclaim) and moderate (reachable
+  but never used). Negative control: aggregate forced into SAMM (B5) must come
+  out critical.
+- **Known-answer call sites:** synthetic sites with designed lifetimes
+  (request-scoped, escaping by ~100 ms, by ~10 s, mixed), and workloads that
+  are all request-scoped or all escaping: the cases K = 2 gets wrong by
+  construction.
+- **Natural-break System rule** (moved from A4(a)): System = the clusters
+  above a significant gap in log-overhang (if it clearly exceeds GC delay),
+  allowing zero or several; compare with K = 2 on the known-answer sites.
 
 ## B4. Workloads (×4) and call-site identification
 
@@ -509,6 +557,11 @@ All of the above ran on the laptop (Ryzen 5 6600H, WSL2). It is pilot data now.
   RSS (`memory.peak`). Internal validation covers all allocators. Fix the
   Layer 1 System rule and derive β from data. Runbook: `docs/vm-test-plan.md`.
 - No longer-timeout re-run of the 500-VU stats.
+- Layer 1 (2026-10-22): K fixed at 2 for the thesis, limitation stated
+  ("all request-scoped or all escaping" workloads); the natural-break rule and
+  the use-after-reclaim counter go to Part B. Layer 1's accuracy is measured
+  with the forced-GC reachability oracle (baseline image, profiler off, low
+  rate), Blackburn-style.
 - The internal-validation work is merged into `main` (2026-10-17); it was kept
   on a private branch until then.
 
