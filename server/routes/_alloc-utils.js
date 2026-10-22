@@ -1,6 +1,7 @@
 'use strict';
 
 const profiler = require('../../profiler');
+const oracle = require('./_oracle');
 
 // Load the custom SAMM allocator only if explicitly enabled.
 // This ensures the baseline benchmark remains completely unaffected.
@@ -39,6 +40,9 @@ const samm = process.env.SAMM_ALLOCATOR_ENABLED === 'true'
     if (callSiteId){
       profiler.track(buffer, callSiteId, buffer.length, req && req.profilerScope);
     }
+
+    // reachability ground truth, if the oracle is running (baseline only)
+    oracle.track(buffer, callSiteId, req);
 
     return buffer;
   }
@@ -84,6 +88,7 @@ const samm = process.env.SAMM_ALLOCATOR_ENABLED === 'true'
 
   function regionMiddleware(req, res, next){
     req.profilerScope = profiler.beginScope();
+    oracle.beginRequest(req, res);
 
     if (samm !== null){
       const id = samm.openRegion();

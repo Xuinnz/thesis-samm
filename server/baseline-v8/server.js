@@ -4,6 +4,7 @@ const express = require('express');
 const registerRoutes = require('../routes/index');
 const profiler = require('../../profiler');
 const telemetry = require('../routes/_telemetry');
+const oracle = require('../routes/_oracle');
 
 const PORT = process.env.PORT || 3000;
 
@@ -13,6 +14,9 @@ const PORT = process.env.PORT || 3000;
 const BODY_LIMIT = process.env.BODY_LIMIT || '1200mb';
 
 profiler.start();
+// Reachability oracle, when SAMM_ORACLE=true: forced GCs, so never in a
+// measured run (see _oracle.js).
+const oracleOn = oracle.start();
 const app = express();
 
 //apply the body limimt to the JSON parser
@@ -61,6 +65,9 @@ const server = app.listen(PORT, () => {
     const isProfilerOn = process.env.SHADOW_PROFILER_ENABLED === 'true';
     console.log(`[samm-baseline] shadow profiler: ${isProfilerOn ? 'ENABLED' : "DISABLED"}`);
     console.log(`[samm-baseline] gc/heap telemetry: ${telemetryOn ? 'ENABLED (observer effect in play)' : 'DISABLED'}`);
+    if (oracleOn) {
+        console.log(`[samm-baseline] reachability oracle: ENABLED, forced GC every ${oracle.gcIntervalMs} ms -> ${oracle.outputDir} (timings are not measurements)`);
+    }
 });
 
 //graceful shutdown

@@ -17,6 +17,11 @@ datasets/shadow-telemetry/raw/*
 datasets/shadow-telemetry/intermediate/step4-missing-value-handling/training_trace_censoring_removed.csv
 datasets/shadow-telemetry/intermediate/step5-feature-engineering/training_trace_with_lifespan.csv
 
+# Reachability-oracle runs (server/scripts/run_oracle.sh): one row per Buffer
+# and per forced GC, tens of MB a run. meta.json and analysis/ stay.
+datasets/oracle/*/objects.csv
+datasets/oracle/*/gcs.csv
+
 # Preprocessing byproduct. k6 and the server read only its summary,
 # jitter_parameters.json.
 datasets/azure-trace-2019/processed/traffic-models/jitter_per_function.csv
