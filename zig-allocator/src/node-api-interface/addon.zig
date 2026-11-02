@@ -32,10 +32,15 @@ const max_call_site_len = 512;
 //
 // Safety: a buffer that escapes its request would otherwise read memory that
 // has been handed to another request. On close the region DETACHES each
-// buffer's ArrayBuffer, so an escaped reference sees a zero-length detached
-// buffer and throws, instead of silently reading recycled bytes. Detach
-// failures are counted rather than ignored -- if that number is ever non-zero
-// the safety net is not working and the run should not be trusted.
+// buffer's ArrayBuffer, so an escaped reference can never reach recycled
+// bytes. It does not fail loudly, though: a detached Buffer reads as empty
+// (length 0, toString() "", write() returns 0), and only bounds-checked reads
+// such as readUInt8 throw. A misrouted escaping call-site therefore loses its
+// data silently instead of corrupting another request's, and zero failed
+// requests does not show that nothing escaped (the reachability oracle,
+// server/routes/_oracle.js, measures that). Detach failures are counted rather
+// than ignored -- if that number is ever non-zero, an escaped reference could
+// read recycled memory and the run should not be trusted.
 const max_regions = 8192;
 
 const RegionEntry = struct {
@@ -92,8 +97,9 @@ fn regionOpen() ?u32 {
     return id;
 }
 
-/// Detaches the buffer so any surviving reference fails loudly, then returns
-/// its space to the allocator.
+/// Detaches the buffer so a surviving reference sees an empty buffer instead
+/// of recycled memory (silently: see REGIONS), then returns its space to the
+/// allocator.
 fn reclaimEntry(env: c.napi_env, entry: RegionEntry) void {
     var value: c.napi_value = undefined;
     if (c.napi_get_reference_value(env, entry.ref, &value) == c.napi_ok and value != null) {
@@ -327,9 +333,9 @@ fn finalizeBuffer(env: c.napi_env, data: ?*anyopaque, hint: ?*anyopaque) callcon
 
 /// samm_warmup() -> bytes: number
 ///
-/// Faults in every stratum's guaranteed floor. Call before the measurement
-/// window opens so that unavoidable first-touch faults are not attributed to
-/// request latency.
+/// Faults in every stratum's floor. Call before the measurement window opens
+/// so that unavoidable first-touch faults are not attributed to request
+/// latency. It touches pages only: the budget is still charged on first use.
 fn warmup(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
     _ = info;
     if (!engine_ready) return throw(env, "samm allocator failed to initialize");

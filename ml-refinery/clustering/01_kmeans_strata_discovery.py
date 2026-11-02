@@ -26,12 +26,12 @@ import json
 # most overhang still go to System and are lost to the allocator; if every
 # call-site escapes, the ones with the least overhang are still managed, and
 # their bytes are reclaimed while something still holds them. The oracle run
-# (stats-eval/oracle) measures each call-site's real reachability after its
-# request ends, which is how either failure would show up.
+# (server/scripts/run_oracle.sh) measures each call-site's real reachability
+# after its request ends, which is how either failure would show up.
 TEMPORAL_STRATA = 2
 
 INPUT_PATH = "../../datasets/shadow-telemetry/intermediate/step6-log-transformation/call_site_features_log_transformed.csv"
-OUTPUT_DIR = "../../datasets/shadow-telemetry/intermediate/ml-refinery"
+OUTPUT_DIR = "../../datasets/shadow-telemetry/intermediate/step7-ml-refinery"
 
 RANDOM_STATE = 42
 

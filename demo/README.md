@@ -96,9 +96,12 @@ one the default, serve it as `/` by renaming.
   accuracy figure, because none of the layers has labelled ground truth; each is
   judged by the kind of decision it makes:
   - *Layer 1, escape detection* (a classifier): the **separation** between the
-    least-escaping escaped call site and the most-lingering managed one, plus the
-    runtime invariants a misroute would break — detach failures and failed
-    requests.
+    least-escaping escaped call site and the most-lingering managed one, plus
+    detach failures and failed requests. Those two guard memory safety; they do
+    not show that nothing escaped. A misrouted escaping buffer is detached
+    without error and then reads as empty, so it fails a request only on a
+    bounds-checked read (`readUInt8`). Escapes are measured offline by the
+    reachability oracle (`server/scripts/run_oracle.sh`).
   - *Layer 2, structure choice* (an optimiser): each call site's **decision
     margin**, i.e. how much less the chosen structure wastes than the other, with
     the closest call highlighted. Sites where both costs are under one huge page

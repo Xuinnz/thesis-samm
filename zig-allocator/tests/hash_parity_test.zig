@@ -10,7 +10,7 @@ const fnv1a = samm.hash.fnv1a;
 //
 // Four of the five strings are real call-sites from server/routes/, and their
 // hashes appear verbatim in
-// datasets/shadow-telemetry/intermediate/ml-refinery/call_site_policy_assignment.csv.
+// datasets/shadow-telemetry/intermediate/step7-ml-refinery/call_site_policy_assignment.csv.
 // So this is not just three implementations of the same formula agreeing: it
 // ties the Zig port back to the hashes the profiler actually wrote into the
 // training trace.

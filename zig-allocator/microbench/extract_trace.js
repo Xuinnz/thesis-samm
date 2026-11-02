@@ -34,7 +34,7 @@ const readline = require('readline');
 const REPO = path.resolve(__dirname, '..', '..');
 const RAW = path.join(REPO, 'datasets', 'shadow-telemetry', 'raw');
 const POLICY_CSV = path.join(REPO, 'datasets', 'shadow-telemetry', 'intermediate',
-  'ml-refinery', 'call_site_policy_assignment.csv');
+  'step7-ml-refinery', 'call_site_policy_assignment.csv');
 
 const OUT = path.resolve(process.argv[2] || path.join(__dirname, '.out', 'traces'));
 const N_SCOPES = Number(process.argv[3] || 30000);

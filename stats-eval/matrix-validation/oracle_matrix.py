@@ -43,7 +43,7 @@ import numpy as np
 import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_POLICY = (REPO_ROOT / "datasets/shadow-telemetry/intermediate/ml-refinery"
+DEFAULT_POLICY = (REPO_ROOT / "datasets/shadow-telemetry/intermediate/step7-ml-refinery"
                   / "call_site_policy_assignment.csv")
 
 # The profiler's call-site hash (profiler/src/profiler.cc Fnv1aHash), which the

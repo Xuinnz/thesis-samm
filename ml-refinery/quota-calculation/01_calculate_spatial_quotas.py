@@ -23,8 +23,8 @@ import numpy as np
 # lets peak demand be computed from when SAMM actually releases memory instead of
 # when V8 happens to collect it.
 TRACE_PATH = "../../datasets/shadow-telemetry/intermediate/step5-feature-engineering/training_trace_with_lifespan.csv"
-POLICY_PATH = "../../datasets/shadow-telemetry/intermediate/ml-refinery/call_site_policy_assignment.csv"
-OUTPUT_DIR = "../../datasets/shadow-telemetry/intermediate/ml-refinery"
+POLICY_PATH = "../../datasets/shadow-telemetry/intermediate/step7-ml-refinery/call_site_policy_assignment.csv"
+OUTPUT_DIR = "../../datasets/shadow-telemetry/intermediate/step7-ml-refinery"
 
 # Container limit 1GB
 # Container memory limit the quotas are sized against. Every downstream number

@@ -18,7 +18,7 @@ const { LOAD } = require('./loads');
 
 const REPO = path.resolve(__dirname, '..');
 const WEIGHTS = path.join(REPO, 'zig-allocator/src/routing-table/model_weights.zig');
-const POLICY_CSV = path.join(REPO, 'datasets/shadow-telemetry/intermediate/ml-refinery/call_site_policy_assignment.csv');
+const POLICY_CSV = path.join(REPO, 'datasets/shadow-telemetry/intermediate/step7-ml-refinery/call_site_policy_assignment.csv');
 // What the characterization run recorded about its own workload. The load
 // point the quotas were trained at is recovered from this, not typed in.
 const MANIFEST = path.join(REPO, 'datasets/shadow-telemetry/raw/workload_manifest.json');

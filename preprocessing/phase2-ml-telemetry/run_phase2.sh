@@ -6,7 +6,7 @@ set -e
 # Resolve the absolute path of the directory containing this master script
 BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "=== [Phase 1] Starting Azure Simulation Preprocessing ==="
+echo "=== [Phase 2] Starting ML Telemetry Preprocessing ==="
 
 # ---------------------------------------------------------------------
 # Step 4: Missing Value Handling

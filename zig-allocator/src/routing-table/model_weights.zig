@@ -1,8 +1,8 @@
 // GENERATED FILE - DO NOT EDIT BY HAND.
 //
 // Produced by ml-refinery/table-compiler/01_compile_routing_table.py from:
-//   datasets/shadow-telemetry/intermediate/ml-refinery/call_site_policy_assignment.csv
-//   datasets/shadow-telemetry/intermediate/ml-refinery/spatial_quotas.json
+//   datasets/shadow-telemetry/intermediate/step7-ml-refinery/call_site_policy_assignment.csv
+//   datasets/shadow-telemetry/intermediate/step7-ml-refinery/spatial_quotas.json
 //
 // Checked into git so the Zig addon builds without a Python step. Re-run
 // the table compiler after any ML Refinery run and commit the result;
@@ -24,7 +24,8 @@ pub const thp_max_rss_distortion_pct: f64 = 3.125;
 
 /// Hard ceiling on bytes committed across every stratum at once.
 pub const m_available_bytes: usize = 657535795;
-/// Sum of the guaranteed floors, charged against the ceiling at startup.
+/// Sum of the floors. Informational: floors are charged against the
+/// ceiling on first use, like elastic growth, not reserved at startup.
 pub const reserved_floor_bytes: usize = 460169216;
 /// Total VIRTUAL extent of the mapping. Deliberately larger than the
 /// ceiling: untouched pages cost nothing, and the real limit is the
@@ -58,7 +59,8 @@ pub const Slot = struct {
 pub const BumpArena = struct {
     call_site_hash: u64,
     offset: usize,
-    /// Guaranteed, reserved at startup, never revocable.
+    /// Usable from the start without growing; charged against the global
+    /// budget on first use, not reserved.
     floor_bytes: usize,
     /// Virtual ceiling it may grow into while the global budget allows.
     span_bytes: usize,
@@ -67,7 +69,7 @@ pub const BumpArena = struct {
     /// sustained traffic, where hundreds of objects are live at any instant,
     /// so the arena could only ever grow and never wrap.
     segment_bytes: usize,
-    /// Segments covered by the guaranteed floor, usable without borrowing.
+    /// Segments covered by the floor, usable without growing the ring.
     floor_segments: u32,
     /// Segments covered by the elastic span.
     max_segments: u32,
@@ -136,7 +138,7 @@ pub const table = [_]Slot{
 
 comptime {
     if (reserved_floor_bytes > m_available_bytes)
-        @compileError("guaranteed floors exceed the global budget");
+        @compileError("the floors exceed the global budget");
     var span_total: usize = 0;
     for (bump_arenas) |arena| span_total += arena.span_bytes;
     for (slab_classes) |class| span_total += class.max_slots * class.class_size;

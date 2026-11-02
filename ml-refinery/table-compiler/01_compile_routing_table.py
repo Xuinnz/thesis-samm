@@ -20,9 +20,17 @@
 #
 # A stratum gets two numbers rather than one:
 #
-#   floor  = P_j, the peak demand characterization actually observed. This is
-#            guaranteed: it is reserved against the global budget at startup and
-#            can never be taken away by another stratum.
+#   floor  = min(F_j, Q_j): F_j is the SAMM_FLOOR_QUANTILE (0.90) quantile of
+#            concurrent demand characterization observed, and all floors are
+#            scaled down together to at most SAMM_FLOOR_BUDGET_FRACTION (70%) of
+#            the pool. A floor is part of the arena from the start (no growth
+#            step to use it), but like elastic growth it is charged against the
+#            global budget on FIRST USE (bump: chargeSegment; slab: the
+#            high-water slot), not reserved at startup -- warmup touches its
+#            pages without charging them. Nothing holds a floor's budget for
+#            it, so elastic growth elsewhere can take budget a stratum has not
+#            yet touched. The check below only guarantees the floors fit the
+#            pool together.
 #   span   = Q_j * ELASTIC_FACTOR, a VIRTUAL extent it may grow into on demand.
 #
 # Spans deliberately sum to more than the pool. Virtual address space costs
@@ -44,10 +52,10 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 
 DEFAULT_POLICY_CSV = os.path.join(
-    REPO_ROOT, "datasets", "shadow-telemetry", "intermediate", "ml-refinery",
+    REPO_ROOT, "datasets", "shadow-telemetry", "intermediate", "step7-ml-refinery",
     "call_site_policy_assignment.csv")
 DEFAULT_QUOTAS_JSON = os.path.join(
-    REPO_ROOT, "datasets", "shadow-telemetry", "intermediate", "ml-refinery",
+    REPO_ROOT, "datasets", "shadow-telemetry", "intermediate", "step7-ml-refinery",
     "spatial_quotas.json")
 DEFAULT_OUTPUT_ZIG = os.path.join(
     REPO_ROOT, "zig-allocator", "src", "routing-table", "model_weights.zig")
@@ -439,11 +447,11 @@ def compile_table(policy_csv, quotas_json_path, output_zig):
     reserved_floor = sum(a["floor"] for a in bump_arenas) + \
         sum(c["floor_slots"] * c["class_size"] for c in slab_classes)
 
-    # Fail loudly: the guaranteed floors must fit inside the pool, or the
-    # guarantee is a fiction and elasticity has nothing left to hand out.
+    # Fail loudly: the floors must fit inside the pool together, or they could
+    # never all be in use at once and elasticity has nothing left to hand out.
     if reserved_floor > m_available_bytes:
         raise SystemExit(
-            f"ERROR: guaranteed floors total {reserved_floor:,} bytes, which exceeds "
+            f"ERROR: the floors total {reserved_floor:,} bytes, which exceeds "
             f"m_available_bytes ({m_available_bytes:,}). Characterized peak demand "
             f"does not fit the pool; re-run the quota calculation.")
 
@@ -480,7 +488,7 @@ def compile_table(policy_csv, quotas_json_path, output_zig):
               f"thp={'on' if c['huge'] else 'off'}")
 
     print(f"\nBudget:")
-    print(f"  guaranteed floors : {reserved_floor:>14,} bytes ({reserved_floor/2**20:8.1f} MB)")
+    print(f"  floors (sum)      : {reserved_floor:>14,} bytes ({reserved_floor/2**20:8.1f} MB)")
     print(f"  global ceiling    : {m_available_bytes:>14,} bytes ({m_available_bytes/2**20:8.1f} MB)")
     print(f"  elastic headroom  : {m_available_bytes-reserved_floor:>14,} bytes "
           f"({(m_available_bytes-reserved_floor)/2**20:8.1f} MB shared)")
@@ -580,7 +588,8 @@ def render_zig(policy_csv, quotas_json_path, m_available_bytes, reserved_floor,
     w("")
     w("/// Hard ceiling on bytes committed across every stratum at once.")
     w(f"pub const m_available_bytes: usize = {m_available_bytes};")
-    w("/// Sum of the guaranteed floors, charged against the ceiling at startup.")
+    w("/// Sum of the floors. Informational: floors are charged against the")
+    w("/// ceiling on first use, like elastic growth, not reserved at startup.")
     w(f"pub const reserved_floor_bytes: usize = {reserved_floor};")
     w("/// Total VIRTUAL extent of the mapping. Deliberately larger than the")
     w("/// ceiling: untouched pages cost nothing, and the real limit is the")
@@ -614,7 +623,8 @@ def render_zig(policy_csv, quotas_json_path, m_available_bytes, reserved_floor,
     w("pub const BumpArena = struct {")
     w("    call_site_hash: u64,")
     w("    offset: usize,")
-    w("    /// Guaranteed, reserved at startup, never revocable.")
+    w("    /// Usable from the start without growing; charged against the global")
+    w("    /// budget on first use, not reserved.")
     w("    floor_bytes: usize,")
     w("    /// Virtual ceiling it may grow into while the global budget allows.")
     w("    span_bytes: usize,")
@@ -623,7 +633,7 @@ def render_zig(policy_csv, quotas_json_path, m_available_bytes, reserved_floor,
     w("    /// sustained traffic, where hundreds of objects are live at any instant,")
     w("    /// so the arena could only ever grow and never wrap.")
     w("    segment_bytes: usize,")
-    w("    /// Segments covered by the guaranteed floor, usable without borrowing.")
+    w("    /// Segments covered by the floor, usable without growing the ring.")
     w("    floor_segments: u32,")
     w("    /// Segments covered by the elastic span.")
     w("    max_segments: u32,")
@@ -676,7 +686,7 @@ def render_zig(policy_csv, quotas_json_path, m_available_bytes, reserved_floor,
     w("")
     w("comptime {")
     w("    if (reserved_floor_bytes > m_available_bytes)")
-    w("        @compileError(\"guaranteed floors exceed the global budget\");")
+    w("        @compileError(\"the floors exceed the global budget\");")
     w("    var span_total: usize = 0;")
     w("    for (bump_arenas) |arena| span_total += arena.span_bytes;")
     w("    for (slab_classes) |class| span_total += class.max_slots * class.class_size;")

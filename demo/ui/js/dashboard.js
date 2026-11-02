@@ -403,8 +403,8 @@ function renderHero(live) {
  * No layer has labelled ground truth, so there is no honest single "accuracy".
  * Each is judged by the kind of decision it makes:
  *
- *   Layer 1 classifies   -> how cleanly the escaping sites separate, plus the
- *                           runtime invariants a misroute would break
+ *   Layer 1 classifies   -> how cleanly the escaping sites separate, plus
+ *                           detach failures (memory safety, not accuracy)
  *   Layer 2 optimises    -> how decisively each choice beat the alternative
  *   Layer 3 predicts     -> how often the provisioned capacity fell short
  *
@@ -448,8 +448,12 @@ function renderValidation(live) {
   }
   rowsInto('val1-rows', [
     ['sent to System', escaped.length ? escaped.map((x) => x.name).join(', ') : 'none'],
-    // If an escaping site had been routed into a region, its buffer would be
-    // detached while still in use -- these are where that would surface.
+    // Detach failures guard memory safety: non-zero means a reclaimed buffer
+    // stayed attached, so an escaped reference could read recycled bytes.
+    // Neither row shows that nothing escaped. A misrouted escaping buffer is
+    // detached successfully and then reads as empty, which fails a request
+    // only on a bounds-checked read (readUInt8). The reachability oracle
+    // (server/scripts/run_oracle.sh) measures escapes; this card cannot.
     ['detach failures', a ? int(a.detachFailures) : 'SAMM mode only',
       a && a.detachFailures > 0 ? 'font-bold text-red-600' : undefined],
     ['failed requests', s.failed_pct === null || s.failed_pct === undefined ? NA : pct(s.failed_pct)],
@@ -459,7 +463,7 @@ function renderValidation(live) {
       chip.textContent = 'SAMM mode only';
       chip.className = 'rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500';
     } else if (a.detachFailures === 0) {
-      chip.textContent = 'safety net held';
+      chip.textContent = 'no detach failures';
       chip.className = 'rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-semibold text-green-700';
     } else {
       chip.textContent = 'detach failed';

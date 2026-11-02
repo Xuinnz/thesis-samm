@@ -69,7 +69,7 @@ def check(name, actual, expected):
         print(f"       actual:   {actual!r}")
 
 
-def run_compiler(workdir, quotas, expect_failure=False):
+def run_compiler(workdir, quotas, expect_failure=False, env=None):
     policy_path = os.path.join(workdir, "policy.csv")
     quotas_path = os.path.join(workdir, "quotas.json")
     output_path = os.path.join(workdir, "model_weights.zig")
@@ -84,7 +84,7 @@ def run_compiler(workdir, quotas, expect_failure=False):
          "--policy-csv", policy_path,
          "--quotas-json", quotas_path,
          "--output", output_path],
-        capture_output=True, text=True)
+        capture_output=True, text=True, env={**os.environ, **(env or {})})
 
     if expect_failure:
         return result
@@ -236,11 +236,19 @@ def main():
         check("clamped floors still fit the budget",
               over_floor <= parse_const(over_src, "m_available_bytes"), True)
 
-        # The drift guard: floors that cannot fit must fail loudly rather than
-        # generate a table promising memory the pool does not have.
+        # A pool too small for the floors does not fail: every floor is scaled
+        # down together to SAMM_FLOOR_BUDGET_FRACTION (default 70%) of it.
         too_small = json.loads(json.dumps(QUOTAS))
         too_small["m_available_bytes"] = 1024
-        result = run_compiler(workdir, too_small, expect_failure=True)
+        small_src = run_compiler(workdir, too_small)
+        check("a pool too small for the floors scales them to 70% of it",
+              parse_const(small_src, "reserved_floor_bytes") <= 0.70 * 1024, True)
+
+        # The drift guard: with a fraction large enough that nothing is scaled,
+        # floors that cannot fit must fail loudly rather than generate a table
+        # promising memory the pool does not have.
+        result = run_compiler(workdir, too_small, expect_failure=True,
+                              env={"SAMM_FLOOR_BUDGET_FRACTION": "100"})
         check("floors that exceed the budget are rejected", result.returncode != 0, True)
         check("the rejection names m_available_bytes",
               "m_available_bytes" in (result.stdout + result.stderr), True)

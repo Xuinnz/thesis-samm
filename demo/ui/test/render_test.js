@@ -169,7 +169,7 @@ const txt = (w, id) => w.document.getElementById(id).textContent.trim();
     const m = man.reduce((mx, x) => (x.median_overhang_ms > mx.median_overhang_ms ? x : mx));
     assert.strictEqual(txt(window, 'val1-big'), `${Math.round(e.median_overhang_ms / m.median_overhang_ms)}×`);
     assert.match(txt(window, 'val1-caption'), new RegExp(e.name));
-    assert.strictEqual(txt(window, 'val1-chip'), 'safety net held');
+    assert.strictEqual(txt(window, 'val1-chip'), 'no detach failures');
 
     const huge = table.budget.huge_page_size / 1048576;
     const closest = table.sites.filter((x) => x.policy === 'Bump' || x.policy === 'Slab').map((x) => {

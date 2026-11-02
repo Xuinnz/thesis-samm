@@ -49,8 +49,8 @@ import os
 import time
 import pandas as pd
 
-INPUT_PATH = "../../datasets/shadow-telemetry/intermediate/ml-refinery/call_site_temporal_clusters.csv"
-OUTPUT_DIR = "../../datasets/shadow-telemetry/intermediate/ml-refinery"
+INPUT_PATH = "../../datasets/shadow-telemetry/intermediate/step7-ml-refinery/call_site_temporal_clusters.csv"
+OUTPUT_DIR = "../../datasets/shadow-telemetry/intermediate/step7-ml-refinery"
 
 def assign_policies():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
