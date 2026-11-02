@@ -43,12 +43,12 @@ it mostly reflects capacity.
 
 ## Phase 1: prepare on the laptop (before renting the VM)
 
-1. **PENDING A3 fixes:** `run_characterization.sh` defaults (k = 1.0 values),
-   GC kind labels, the Phase 2 banner, stale floor comments, the output-folder
-   rename, the two tooltips, the empty Oct 8 recordings.
-2. **Layer 1:** done 2026-10-22: K fixed at 2 (be17915) and the reachability
-   oracle with its matrix analysis (77fc827). Left: fix the wording claiming
-   misroutes fail loudly (`addon.zig`, the demo's Layer 1 card). The
+1. **PENDING A3 fixes:** done 2026-11-02 except the empty Oct 8 recordings
+   (your call). Two new ones from that batch: decide whether floors should be
+   reserved at init (A3 item 9), and the failing steady-state allocator test
+   (A3 item 10).
+2. **Layer 1:** done: K fixed at 2 (be17915), the reachability oracle with
+   its matrix analysis (77fc827), and the misroute wording (2026-11-02). The
    natural-break rule moved to ISMM (PENDING B3).
 3. **β from data:** a helper that reads a SAMM run (with `POLL_SAMM_STATS=1`)
    and reports peak memory outside the pool (RSS − committed), then the

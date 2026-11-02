@@ -139,16 +139,19 @@ drift test.
    map (better: read `perf_hooks.constants`), and correct the labels in
    `benchmark-results/gc-control/README.md` and `summary.txt`. Optionally record
    the GC entries' `flags` (trigger reasons).
-3. **`preprocessing/phase2-ml-telemetry/run_phase2.sh` prints the wrong
+3. **Done 2026-11-02.** **`preprocessing/phase2-ml-telemetry/run_phase2.sh` prints the wrong
    banner:** "=== [Phase 1] Starting Azure Simulation Preprocessing ===".
-4. **Stale comments about floors (comment-only).**
+4. **Done 2026-11-02 (table regenerated: only comments, the input paths and
+   one error message changed; every number identical).** **Stale comments about floors (comment-only).**
    `ml-refinery/table-compiler/01_compile_routing_table.py` (header: "floor =
    P_j ... reserved against the global budget at startup") and the text it
    emits into `model_weights.zig` ("charged against the ceiling at startup")
    are out of date. Floors are the 90th-percentile demand capped at 70 % of the
    pool, and bump (`chargeSegment`) and slab charge the budget on FIRST USE, not
    at startup. Fix the wording, regenerate; numbers should come out identical.
-5. **Confusing folder name: `datasets/shadow-telemetry/intermediate/ml-refinery/`.**
+5. **Done 2026-11-02: renamed to `intermediate/step7-ml-refinery/`; all paths
+   updated; a full refinery run in a scratch copy reproduced the quotas and a
+   byte-identical `model_weights.zig`.** **Confusing folder name: `datasets/shadow-telemetry/intermediate/ml-refinery/`.**
    It is the refinery's OUTPUT data, not code. Rename (e.g.
    `intermediate/step7-ml-refinery/`) before the VM run so paths are settled.
    Update every path in: writers `ml-refinery/clustering/01_kmeans_strata_discovery.py`,
@@ -159,7 +162,7 @@ drift test.
    comments in `zig-allocator/tests/hash_parity_test.zig` and the generated
    `model_weights.zig` header. Then check the demo's table and ML card, and run
    the tests.
-6. **Fix two inaccurate tooltip texts in `demo/ui/v2.html`:** "Page Faults / s"
+6. **Done 2026-11-02.** **Fix two inaccurate tooltip texts in `demo/ui/v2.html`:** "Page Faults / s"
    says "Memory pages loaded from disk per second" (they are first-touch
    faults); "Dropped" says "dropped or failed" (it counts dropped iterations
    only).
@@ -175,6 +178,30 @@ drift test.
    `internal-validation/k6-scenarios/lib/workload.js`. The earlier decision was
    to do this only if the realistic benchmark is re-run; the main study re-runs
    it, and processing p99 is now a statistical metric.
+
+9. **[decide] Floors are not reserved (found 2026-11-02).** The compiler's
+   comments called floors "guaranteed, reserved at startup". In the allocator
+   they are charged against the global budget on FIRST USE (bump
+   `chargeSegment`, slab high-water slots; `high_water` starts at 0), and
+   warmup touches their pages without charging them. So elastic growth in one
+   arena can take budget another arena's untouched floor would need; the
+   compiler only checks that the floors fit the pool together. Comments now say
+   this. Decide before the VM retrain: keep it (state it in the thesis), or
+   charge every floor against the budget at init (a behaviour change, so it
+   needs re-running anything compared against the current allocator).
+10. **[investigate] `run_tests.sh` had been stopping at step 1 (found
+   2026-11-02).** The compiler fixture test still expected a too-small pool to
+   be rejected, but floors have been scaled to 70 % of the pool since that
+   rule was added, so the build passes; with `set -e` the Zig and Node tests
+   after it never ran. Test updated to the current rule (fixed). With it
+   passing, steps 2-5 and 7 pass, but **step 6 fails, and also fails at the
+   previous commit**: `steady_state_test.js` "recycling is preferred over
+   borrowing" sees ~80 grows against 5-6 resets (limit: grows < 2 × resets +
+   16) on the batch shape (16.9 KB objects, 195 live, unscoped, so freed by
+   finalizers). Everything else in that test passes: all 20,000 served, 0
+   blocked, no aliasing. Find out whether this is a regression (e.g. since 8
+   segments per floor) or a stale threshold before changing either; do not
+   loosen the threshold to make it pass.
 
 ## A4. Model fixes before retraining on the VM
 
@@ -209,7 +236,8 @@ to System (lost gain); all escaping → the ones with the least are still
 managed (their data is lost on reuse). The natural-break rule (zero or several
 System clusters) is now ISMM work (B3).
 
-**Still to do:** correct the wording that claims misroutes surface loudly:
+**Done 2026-11-02:** corrected the wording that claimed misroutes surface loudly
+(the card's chip now reads "no detach failures"):
 `zig-allocator/src/node-api-interface/addon.zig` (REGIONS block,
 `reclaimEntry`), and the demo's Layer 1 card ("safety net held") and its
 comment in `renderValidation` (`demo/ui/js/dashboard.js`).
