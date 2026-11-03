@@ -189,19 +189,34 @@ drift test.
    this. Decide before the VM retrain: keep it (state it in the thesis), or
    charge every floor against the budget at init (a behaviour change, so it
    needs re-running anything compared against the current allocator).
-10. **[investigate] `run_tests.sh` had been stopping at step 1 (found
-   2026-11-02).** The compiler fixture test still expected a too-small pool to
-   be rejected, but floors have been scaled to 70 % of the pool since that
-   rule was added, so the build passes; with `set -e` the Zig and Node tests
-   after it never ran. Test updated to the current rule (fixed). With it
-   passing, steps 2-5 and 7 pass, but **step 6 fails, and also fails at the
-   previous commit**: `steady_state_test.js` "recycling is preferred over
-   borrowing" sees ~80 grows against 5-6 resets (limit: grows < 2 × resets +
-   16) on the batch shape (16.9 KB objects, 195 live, unscoped, so freed by
-   finalizers). Everything else in that test passes: all 20,000 served, 0
-   blocked, no aliasing. Find out whether this is a regression (e.g. since 8
-   segments per floor) or a stale threshold before changing either; do not
-   loosen the threshold to make it pass.
+10. **[decide] `run_tests.sh` had been stopping at step 1, hiding a
+   steady-state failure (found 2026-11-02, cause found 2026-11-03).** The
+   compiler fixture test still expected a too-small pool to be rejected
+   (floors are scaled to 70 % of the pool now); fixed. With it passing, steps
+   2-5 and 7 pass and step 6 fails: `steady_state_test.js`, "recycling is
+   preferred over borrowing" (grows < 2 × resets + 16).
+   - **Not a code regression:** the allocator and the table are unchanged since
+     the test was added (2026-09-29) except comments; it fails at the previous
+     commit too.
+   - **Cause: GC timing.** The test allocates OUTSIDE any region, so segments
+     are freed only when V8 collects the dropped Buffers and their finalizers
+     run. On Node 24 (this laptop's default) ~80 grows vs 5-6 resets, all
+     20,000 served; on **Node 22 (the server image and the VM)** the arena grows
+     to its maximum (122 segments) and 2,507-5,986 of 20,000 fall back to
+     malloc. With one forced GC per batch it passes on both, threshold
+     unchanged (Node 22: 21 resets, 12 grows; Node 24: 18 resets, 27 grows). So
+     segment recycling works; collection on V8's own schedule is too slow for
+     this shape.
+   - **The server does not use this path:** the Oct 1 k = 2.5 SAMM demo run had
+     0 unscoped allocations and 5,830,039 reclaimed by regions; region_test
+     passes. The GC-driven path only serves allocations made outside a request
+     (or when all 8,192 regions are taken; 0 in recorded runs).
+   - **Decide:** (a) make the test deterministic (`--expose-gc`, one forced GC
+     per batch: it then tests the recycling logic, which is what its comments
+     describe) and record the natural-GC numbers as a characterization of the
+     unscoped path; or (b) keep it as is, which fails on the VM's Node 22.
+     Either way state in the thesis that reclamation outside a region depends
+     on GC timing and can exhaust a bump arena on Node 22.
 
 ## A4. Model fixes before retraining on the VM
 
