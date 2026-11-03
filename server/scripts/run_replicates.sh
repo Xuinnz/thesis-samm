@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# run_replicates.sh — n independent cycles of the three-way comparison.
+# run_replicates.sh — n independent cycles of the comparison (three-way by
+# default; CONDITIONS picks a subset, e.g. the main study's two-way).
 #
 # Characterization and the ML refinery are NOT re-run: the routing table is
 # already compiled for this workload, and recompiling between replicates would
@@ -10,6 +11,18 @@
 #   K=1.0 N=15 ./server/scripts/run_replicates.sh     # main table, all healthy
 #   K=2.0 N=10 ./server/scripts/run_replicates.sh     # survival rate under stress
 #   K=1.0 N=15 SUMMARY_ONLY=1 ./server/scripts/run_replicates.sh   # re-print results
+#
+#   # main study on the VM: two-way, server on core 1, k6 on cores 2-3
+#   K=<locked k> N=100 CONDITIONS="jemalloc samm" CPUSET_CPUS=1 K6_TASKSET=2,3 \
+#     RESULTS_DIR=benchmark-results/main-study ./server/scripts/run_replicates.sh
+#   ... DRY_RUN=1 ...   # print each replicate's seed and order, run nothing
+#
+# ORDER. ROTATE=1 (default) rotates the condition order every replicate
+# (two conditions: AB, BA, AB, ...; three: ABC, BCA, CAB, ...), so slow drift
+# in the host or a position effect (first run after a pause, a warm page cache)
+# lands on every condition equally instead of always on the first. The order is
+# fixed by the replicate index, so a resumed campaign keeps it, and each result
+# records its run_order and order_position. ROTATE=0 keeps CONDITIONS' order.
 #
 # RESUMABLE. Each condition writes one JSON per replicate and an existing file is
 # skipped, so an interrupted campaign continues where it stopped rather than
@@ -32,6 +45,18 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 K="${K:-1.0}"
 N="${N:-15}"
+read -r -a CONDS <<< "${CONDITIONS:-glibc jemalloc samm}"
+for c in "${CONDS[@]}"; do
+  case "$c" in glibc|jemalloc|samm) ;; *) echo "ERROR: unknown condition '$c' (use glibc, jemalloc, samm)"; exit 1 ;; esac
+done
+ROTATE="${ROTATE:-1}"
+
+# Condition order for replicate $1: rotated left by (replicate - 1).
+replicate_order() {
+  local i="$1" n=${#CONDS[@]} shift_by=0 j
+  [ "$ROTATE" = "1" ] && shift_by=$(( (i - 1) % n ))
+  for ((j = 0; j < n; j++)); do printf '%s ' "${CONDS[$(( (j + shift_by) % n ))]}"; done
+}
 
 # Load point. Arrival rate scales by k, every hold by 1/k, so peak live bytes --
 # and every quota derived from them -- stay put while CPU pressure rises.
@@ -87,20 +112,26 @@ JEMALLOC_SO="${JEMALLOC_SO:-/usr/lib/x86_64-linux-gnu/libjemalloc.so.2}"
 
 if [ "${SUMMARY_ONLY:-0}" != "1" ]; then
   echo "======================================================================"
-  echo " Replicates: n=$N at k=$K"
+  echo " Replicates: n=$N at k=$K, conditions: ${CONDS[*]} ($([ "$ROTATE" = "1" ] && echo 'order rotated each replicate' || echo 'fixed order'))"
   echo " Per run  : ${SIMULATION_MINUTES}m, MAX_RPS=$MAX_RPS, process hold ${PROCESS_HOLD_MS}ms, fetch hold x${HOLD_SCALE}"
   echo " Container: ${MEM_LIMIT}, swap off, ${CPUS} vCPU"
   echo " Seed     : $BASE_SEED $([ "$VARY_SEED" = "1" ] && echo '+ replicate index (paired: same seed for all conditions in a replicate)' || echo '(fixed across all replicates)')"
   echo " Results  : $RESULTS_DIR"
-  echo " Estimate : ~$(( N * 3 * 12 / 60 ))h$(( N * 3 * 12 % 60 ))m  (resumable; existing results are skipped)"
+  echo " Pinning  : server ${CPUSET_CPUS:-not pinned}, k6 ${K6_TASKSET:-not pinned}"
+  echo " Estimate : ~$(( N * ${#CONDS[@]} * 12 / 60 ))h$(( N * ${#CONDS[@]} * 12 % 60 ))m  (resumable; existing results are skipped)"
   echo "======================================================================"
 
   for i in $(seq 1 "$N"); do
     export SCHEDULE_SEED=$([ "$VARY_SEED" = "1" ] && echo $((BASE_SEED + i)) || echo "$BASE_SEED")
-    echo; echo "########## replicate $i/$N (seed $SCHEDULE_SEED) ##########"
-    for cond in glibc jemalloc samm; do
+    read -r -a order <<< "$(replicate_order "$i")"
+    export RUN_ORDER="${order[*]}"
+    echo; echo "########## replicate $i/$N (seed $SCHEDULE_SEED, order: $RUN_ORDER) ##########"
+    pos=0
+    for cond in "${order[@]}"; do
+      pos=$((pos + 1)); export RUN_ORDER_POSITION=$pos
       label="r$(printf '%02d' "$i")-$cond"
       if [ -f "$RESULTS_DIR/$label.json" ]; then echo "  [$label] already done, skipping"; continue; fi
+      if [ "${DRY_RUN:-0}" = "1" ]; then echo "  [$label] would run (position $pos)"; continue; fi
       case "$cond" in
         glibc)    run_condition "$label" "docker/baseline-environment/Dockerfile" "samm-baseline:bench" "rep-glibc" || echo "[[ $label FAILED ]]" ;;
         jemalloc) run_condition "$label" "docker/baseline-environment/Dockerfile" "samm-baseline:bench" "rep-jem" \

@@ -31,6 +31,10 @@ MEM_LIMIT="${MEM_LIMIT:-1024m}"
 MEMSWAP_LIMIT="${MEMSWAP_LIMIT:-1024m}"
 CPUS="${CPUS:-1.0}"
 HOST_PORT="${HOST_PORT:-3000}"
+# Core pinning, for a machine with cores to spare (the VM: server on core 1, k6
+# on cores 2-3, the OS on core 0). Unset = no pinning, as on the laptop.
+CPUSET_CPUS="${CPUSET_CPUS:-}"
+K6_TASKSET="${K6_TASKSET:-}"
 
 # --- k6 traffic parameters (identical across conditions) -------------------
 # Defaults match server/run_characterization.sh, so the benchmark drives the
@@ -118,13 +122,18 @@ run_condition() {
     log "Building image ($dockerfile)..."
     docker build -q -f "$REPO_ROOT/$dockerfile" -t "$image" "$REPO_ROOT" >/dev/null
 
-    log "Starting container (mem=$MEM_LIMIT swap=$MEMSWAP_LIMIT cpus=$CPUS)..."
+    local image_id started_at
+    image_id=$(docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || echo unknown)
+    started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+    log "Starting container (mem=$MEM_LIMIT swap=$MEMSWAP_LIMIT cpus=$CPUS${CPUSET_CPUS:+ on core(s) $CPUSET_CPUS})..."
     docker run -d \
         --name "$container" \
         --memory="$MEM_LIMIT" \
         --memory-swap="$MEMSWAP_LIMIT" \
         --memory-swappiness=0 \
         --cpus="$CPUS" \
+        ${CPUSET_CPUS:+--cpuset-cpus="$CPUSET_CPUS"} \
         -p "${HOST_PORT}:3000" \
         -e SHADOW_PROFILER_ENABLED="$SHADOW_PROFILER_ENABLED" \
         -e SAMM_TELEMETRY="$SAMM_TELEMETRY" \
@@ -217,6 +226,29 @@ run_condition() {
         poller_pid=$!
     fi
 
+    # Optional, for calibration runs only (POLL_SAMM_STATS=1): SAMM's counters
+    # from /samm/stats and the cgroup's memory.current, sampled together once a
+    # second. server/scripts/derive_beta.py reads this to measure the memory
+    # SAMM's pool does not account for. Each poll is a request the server must
+    # answer, so measured runs leave it off. On the baseline image the endpoint
+    # answers {"allocator":null}.
+    local samm_poll_pid=""
+    if [ "${POLL_SAMM_STATS:-0}" = "1" ] && [ -n "$CG_DIR" ]; then
+        local samm_file="$RESULTS_DIR/${BENCH_LABEL}-samm-stats.jsonl"
+        : > "$samm_file"
+        (
+            while [ -r "$CG_DIR/memory.current" ]; do
+                # A saturated server may answer late or not at all: record null.
+                body=$(curl -s -m 2 "http://localhost:${HOST_PORT}/samm/stats" 2>/dev/null)
+                printf '{"uptime_s":%s,"wall_ms":%s,"memory_current":%s,"stats":%s}\n' \
+                    "$(cut -d' ' -f1 /proc/uptime)" "$(date +%s%3N)" \
+                    "$(cat "$CG_DIR/memory.current" 2>/dev/null || echo null)" "${body:-null}" >> "$samm_file"
+                sleep 1
+            done
+        ) &
+        samm_poll_pid=$!
+    fi
+
     # CFS throttling counters, read before and after. nr_throttled rising is
     # the definitive statement that the container wanted more CPU than its
     # quota allowed -- far more reliable than inferring saturation from sampled
@@ -240,7 +272,7 @@ run_condition() {
     window_start=$(date +%s)
     (
         cd "$K6_SCENARIO_DIR"
-        k6 run \
+        ${K6_TASKSET:+taskset -c "$K6_TASKSET"} k6 run \
             --summary-export="$summary_json" \
             --summary-trend-stats="avg,min,med,p(90),p(95),p(99),max" \
             -e BASE_URL="http://localhost:${HOST_PORT}" \
@@ -271,6 +303,7 @@ run_condition() {
 
     # Stop the poller before the final reads so it cannot race them.
     if [ -n "$poller_pid" ]; then kill "$poller_pid" 2>/dev/null || true; wait "$poller_pid" 2>/dev/null || true; fi
+    if [ -n "$samm_poll_pid" ]; then kill "$samm_poll_pid" 2>/dev/null || true; wait "$samm_poll_pid" 2>/dev/null || true; fi
 
     local peak_bytes mem_limit_bytes oom_kills
     peak_bytes=$(cg_read memory.peak "$container")
@@ -322,7 +355,13 @@ run_condition() {
     docker rm -f "$container" >/dev/null 2>&1 || true
     trap - EXIT INT TERM
 
-    # Fold k6's metrics and the container metrics into one result file.
+    # Fold k6's metrics and the container metrics into one result file. The
+    # BENCH_* values are provenance: what ran, on which seed, in which slot of
+    # the replicate's order (set by run_replicates.sh), under which table.
+    BENCH_SEED="$SCHEDULE_SEED" BENCH_IMAGE_ID="$image_id" BENCH_STARTED_AT="$started_at" \
+    BENCH_TABLE_SHA256="$(sha256sum "$REPO_ROOT/zig-allocator/src/routing-table/model_weights.zig" | cut -d' ' -f1)" \
+    BENCH_ORDER="${RUN_ORDER:-}" BENCH_ORDER_POSITION="${RUN_ORDER_POSITION:-}" \
+    BENCH_CPUSET="$CPUSET_CPUS" BENCH_K6_TASKSET="$K6_TASKSET" \
     "$PYTHON_BIN" - "$summary_json" "$result_json" "$BENCH_LABEL" "$peak_bytes" "$oom_kills" \
         "$mem_limit_bytes" "$cpu_usage_usec" "$cpu_throttled_usec" "$cpu_nr_throttled" \
         "$window_secs" "$MAX_RPS" "$CPUS" "$SIMULATION_MINUTES" "$page_faults" <<'PYEOF'
@@ -416,6 +455,14 @@ result = {
     "processing_p99_ms": round(g("processing_time", "p(99)"), 2),
     "processing_max_ms": round(g("processing_time", "max"), 2),
     "dropped_iterations": int(g("dropped_iterations", "count")),
+    "schedule_seed": int(os.environ["BENCH_SEED"]) if os.environ.get("BENCH_SEED", "").isdigit() else None,
+    "image_id": os.environ.get("BENCH_IMAGE_ID") or None,
+    "routing_table_sha256": os.environ.get("BENCH_TABLE_SHA256") or None,
+    "started_at": os.environ.get("BENCH_STARTED_AT") or None,
+    "run_order": os.environ.get("BENCH_ORDER") or None,
+    "order_position": int(os.environ["BENCH_ORDER_POSITION"]) if os.environ.get("BENCH_ORDER_POSITION", "").isdigit() else None,
+    "cpuset_cpus": os.environ.get("BENCH_CPUSET") or None,
+    "k6_taskset": os.environ.get("BENCH_K6_TASKSET") or None,
 }
 if result["requests"]:
     result["page_faults_per_request"] = round(int(page_faults) / result["requests"], 1)
