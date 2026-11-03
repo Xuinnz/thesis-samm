@@ -50,17 +50,26 @@ it mostly reflects capacity.
 2. **Layer 1:** done: K fixed at 2 (be17915), the reachability oracle with
    its matrix analysis (77fc827), and the misroute wording (2026-11-02). The
    natural-break rule moved to ISMM (PENDING B3).
-3. **β from data:** a helper that reads a SAMM run (with `POLL_SAMM_STATS=1`)
-   and reports peak memory outside the pool (RSS − committed), then the
-   ceiling C = 1024 − that peak − 32 MB and β = C ÷ 836 MB. The quota script
-   already takes `SAMM_BETA_UTILIZATION`. Also measure the 80 MB V8 baseline.
+3. **β from data:** done 2026-11-03. `server/scripts/derive_beta.py` reads a
+   SAMM run (`_bench-lib.sh` with `POLL_SAMM_STATS=1`, an internal-validation
+   run, or a demo recording) and reports memory outside the pool
+   (memory.current − committed: median, p99, peak), the ceiling C = container −
+   peak − 32 MB and β = C ÷ POOL_HARD_LIMIT (from `spatial_quotas.json`), plus
+   memory before the pool is touched (the 80 MB V8 assumption). Checked on the
+   Oct 1 k = 2.5 demo run: peak 359.7 MB outside, β = 0.756.
 4. **`processing_time` fix in `load-generator/k6-scenarios/samm-load-test.js`**
    (subtract the delay Node actually schedules, `Math.trunc(hold_ms)`, and
    count remaining clamps), as in `internal-validation/k6-scenarios/lib/workload.js`.
-5. **Host probe:** replace the PowerShell clock check with an NTP check
-   (`chronyc tracking`); keep checks 1-3, to be re-referenced on the VM.
-6. **`run_replicates.sh`:** a way to choose conditions (`jemalloc samm` for the
-   main study) and **rotate the condition order** across replicates.
+5. **Host probe:** done 2026-11-03. Off WSL, check 0 compares the monotonic
+   clock with an NTP server (`metadata.google.internal` on GCP) over 60 s,
+   limit ±1 % as before, and fails if `chronyc tracking` says unsynchronised.
+   Checks 1-3 take a recorded reference: `host-probe.sh <dir> reference`, then
+   `PROBE_REFERENCE=<dir>`, `K6_STARTUP_LIMIT_S`, `PROBE_CPU`.
+6. **`run_replicates.sh`:** done 2026-11-03. `CONDITIONS="jemalloc samm"`,
+   condition order rotated per replicate (`ROTATE=0` to fix it), `DRY_RUN=1`
+   to print the plan. `_bench-lib.sh` takes `CPUSET_CPUS` (server core) and
+   `K6_TASKSET` (k6 cores), and every result records its seed, image ID,
+   routing-table hash, start time, order and position, and pinning.
 7. **Optional (ISMM):** `run.sh` configs for page-keeping jemalloc
    (`MALLOC_CONF=oversize_threshold:0,dirty_decay_ms:-1,muzzy_decay_ms:-1`),
    SAMM with `SAMM_RECLAIM_POLICY=dontneed`, and the Buffer pooling baseline.
@@ -85,9 +94,14 @@ it mostly reflects capacity.
 
 ## Phase 3: health reference (half a day)
 
-1. Run the clock check, k6 start-up, and a **reference microbenchmark** run.
-2. **Set the probe limits from that reference** (same ±10 % bands as on the
-   laptop) and write them down **before any benchmark**.
+1. Record the reference: `PROBE_CPU=1 internal-validation/host-probe.sh
+   results/probe-reference reference` (clock check, k6 start-up, reference
+   microbenchmark on the server's core).
+2. **Set the probe limits from that reference** and write them down **before
+   any benchmark**: `PROBE_REFERENCE=results/probe-reference`, the same
+   0.90-1.10x / ≤ 1.10x bands for checks 2-3, and `K6_STARTUP_LIMIT_S` (e.g.
+   1.10 × the reference's k6 start-up; the laptop used 80 s against 60-77 s
+   healthy).
 3. From then on: probe before every batch and once a day; a failed probe means
    stop and report.
 
@@ -129,11 +143,15 @@ it mostly reflects capacity.
 
 ## Phase 6: derive β at the locked load point, then the final table (about a day)
 
-1. Run SAMM at the locked k with `POLL_SAMM_STATS=1`: peak (RSS − committed)
-   → C → β.
-2. Recompile the table with that β (`SAMM_BETA_UTILIZATION`), rebuild the
-   image, and **run once more to confirm** (iterate once: fewer fallbacks
-   change the memory outside the pool).
+1. Run SAMM at the locked k with `POLL_SAMM_STATS=1` (one 10-minute run, e.g.
+   `K=<locked> N=1 CONDITIONS=samm POLL_SAMM_STATS=1 CPUSET_CPUS=1
+   K6_TASKSET=2,3 RESULTS_DIR=benchmark-results/beta-pass1
+   server/scripts/run_replicates.sh`), then
+   `server/scripts/derive_beta.py benchmark-results/beta-pass1/r01-samm-samm-stats.jsonl`.
+2. Recompile the table with that β (`SAMM_BETA_UTILIZATION` for the quota
+   script, then the table compiler), rebuild the image, and **run once more to
+   confirm** (iterate once: fewer fallbacks change the memory outside the
+   pool).
 3. **Freeze the table** for everything after this (record the
    `model_weights.zig` hash, fingerprint and image ID). At k ≠ 1.0 SAMM needs
    `SAMM_ALLOW_WORKLOAD_MISMATCH=true` (as in the demo).
@@ -161,7 +179,9 @@ All allocators (glibc, jemalloc, SAMM; plus the variants if ready), final table:
 ## Phase 9: external validation, the main study (about 2 days of machine time)
 
 1. **Pilot:** 2-3 runs at the locked k, to confirm stability.
-2. **Main study:** `run_replicates.sh`, conditions **jemalloc, SAMM**,
+2. **Main study:** `K=<locked> N=100 CONDITIONS="jemalloc samm" CPUSET_CPUS=1
+   K6_TASKSET=2,3 RESULTS_DIR=benchmark-results/main-study
+   server/scripts/run_replicates.sh` (check the plan first with `DRY_RUN=1`):
    **n = 100**, paired seeds (one seed per replicate, shared by both), rotated
    order, **10-minute runs**, resumable. About **40 h** (~12 min per run).
 3. A small **GC-instrumented pass** (clean pass for metrics, instrumented pass

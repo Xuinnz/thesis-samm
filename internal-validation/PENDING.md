@@ -45,7 +45,8 @@ Replaces the old laptop tasks (WSL clock, page-fault anomaly, reverse-order
 replicate). Internal validation runs on the VM too, and comes first, because it
 sets the operating point there. Order:
 
-1. **Probe.** Port `host-probe.sh`: replace check 0 (it calls `powershell.exe`)
+1. **Probe (ported 2026-11-03: NTP clock check, `reference` mode; runbook
+   Phases 1 and 3).** Port `host-probe.sh`: replace check 0 (it calls `powershell.exe`)
    with an NTP-based clock check, take a reference run on the VM for checks
    1-3, and fix the VM's limits from that reference BEFORE any benchmark (never
    adjust them after seeing a result).
@@ -290,6 +291,14 @@ fixed. Two ways:
    choose the study's load point first.
 Also measure the hardcoded 80 MB V8 baseline the same way. Either way means
 retraining and re-benchmarking; do it on the VM.
+
+**Helper done 2026-11-03: `server/scripts/derive_beta.py`** (option 2; runbook
+Phase 6). On the Oct 1 k = 2.5 demo run: 359.7 MB peak outside the pool
+(p99 359.5, median 212.2), C = 632.3 MB, β = 0.756. On the Oct 4 calibration
+(up to its OOM): 277.9 MB, β = 0.854. Memory before the pool is touched was
+26-27 MB in both, against the 80 MB the quota script assumes. That constant
+does not change the derived ceiling (β is solved against the same
+POOL_HARD_LIMIT that subtracts it), only β's value.
 
 ## A5. Statistics, after the n = 100 runs
 
@@ -618,6 +627,7 @@ All of the above ran on the laptop (Ryzen 5 6600H, WSL2). It is pilot data now.
 | Oct 4 10:58 | — | 58.2 s | 0.90x | 0.81x | 0.89x | fail (writes fast; native jemalloc+writes 0.76x, engine 1.03x) |
 | Oct 8 17:19 (k6-only) | 98.5 % (hyperv_clocksource_tsc_page) | 71.5 s | | | | fail (clock) |
 | Oct 9 07:43 (full) | 98.2 % (tsc) | 62.1 s | 1.05x | 0.97x | 1.04x | fail (clock only); output was in a scratch folder, not kept |
+| Nov 3 (testing the NTP check and reference mode) | 92.1 % vs NTP, 91.6 % vs Windows over the same 20 s (tsc) | 111.4-162.4 s | 1.18-3.69x | 1.05-2.10x | 1.20-3.75x | fail (clock, k6; microbench unstable run to run); scratch output, not kept |
 
 ## Things to remember
 
