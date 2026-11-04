@@ -15,16 +15,132 @@ demo/
 
 ## Run it
 
+Every command below runs from the repository root. Use `v2.html` when
+presenting: it fits on a laptop screen (see "Two layouts").
+
+### Once per machine
+
+Pull, then build the two images the collector starts (they are tagged
+`:bench`, the same images the benchmarks use; rebuild after any pull):
+
 ```bash
-node demo/collector.js --label SAMM --container samm-demo --port 9100
+git pull
 ```
 
-Then open <http://localhost:9100/>. On the second laptop, run the same command
-with `--label BASELINE` and switch that one to baseline mode from its own page.
+```bash
+docker build -f docker/baseline-environment/Dockerfile -t samm-baseline:bench .
+```
 
-Useful flags: `--k6 http://127.0.0.1:6565`, `--server http://127.0.0.1:3000`,
-`--mode samm|baseline`, `--replay demo/recordings/<file>.jsonl`, `--warmup true`,
-`--window 5` (rolling latency window, seconds), `--k6-dashboard-port 5665`.
+```bash
+docker build -f docker/samm-environment/Dockerfile -t samm-enabled:bench .
+```
+
+Live runs also need k6 (v0.55.0) and free ports 3000 (server), 6565 and 5665
+(k6), 9100 (collector). A replay needs neither Docker nor k6.
+
+### A. Replay: the safest way to present (one laptop)
+
+Two recorded runs, side by side, from two collectors on one machine. The
+recordings play in real time: about a minute of k6 start-up, then three
+minutes of load. Terminal 1, SAMM (918 req/s, 1.2 % dropped, 0 failed):
+
+```bash
+node demo/collector.js --label SAMM --mode samm --port 9100 --replay demo/recordings/SAMM-samm-k2.5-s2025-2026-10-08T13-31-45-401Z.jsonl
+```
+
+Terminal 2, the V8 baseline on the same seed (OOM-killed about 151 s into the load):
+
+```bash
+node demo/collector.js --label BASELINE --mode baseline --port 9101 --replay demo/recordings/SAMM-baseline-k2.5-s2025-2026-10-08T13-27-11-406Z.jsonl
+```
+
+Then open <http://localhost:9100/v2.html> and <http://localhost:9101/v2.html>
+in two windows. To restart, Ctrl+C both and run them again; an open page
+clears itself on reconnect.
+
+- `--mode` must match the recording. It sets the badge and which panels show;
+  the recording does not carry it.
+- The routing table and ML validation panels show the CURRENT table, not the
+  one at recording time. Its numbers have not changed since 2026-09-21, so both
+  pairs here match.
+- Another clean pair, from Sept 25:
+  `demo/recordings/BASELINE-samm-k2.5-s2025-2026-09-24T23-08-17-730Z.jsonl`
+  (`--mode samm`) and
+  `demo/recordings/BASELINE-baseline-k2.5-s2025-2026-09-24T23-03-57-170Z.jsonl`
+  (`--mode baseline`).
+- Your own rehearsal runs land in `demo/recordings/` as
+  `<label>-<mode>-k<k>-s<seed>-<time>.jsonl`; replay them the same way.
+
+### B. Live: two laptops, one allocator each
+
+Check the host first (about two minutes). A failed probe (WSL's clock running
+slow, k6 start-up over 80 s) means live numbers are not representative:
+present the replay instead.
+
+```bash
+internal-validation/host-probe.sh /tmp/samm-probe k6-only
+```
+
+SAMM laptop, terminal 1 (the collector):
+
+```bash
+node demo/collector.js --label SAMM --port 9100
+```
+
+SAMM laptop, terminal 2 (start the SAMM container):
+
+```bash
+curl -s -X POST localhost:9100/mode -d '{"mode":"samm"}'
+```
+
+Baseline laptop, terminal 1:
+
+```bash
+node demo/collector.js --label BASELINE --port 9100
+```
+
+Baseline laptop, terminal 2:
+
+```bash
+curl -s -X POST localhost:9100/mode -d '{"mode":"baseline"}'
+```
+
+Open <http://localhost:9100/v2.html> on each and wait for "container up". Then
+**Test with K6** on both with the **same k, seed and minutes** (defaults: k =
+2.5, seed 2025, 3 minutes), started together. The header button switches a
+machine to the OTHER mode, so at start-up, before any container exists, it may
+offer the wrong one; the `curl` lines start the right one directly.
+
+### C. Live: one laptop, one mode after the other
+
+Start as on the SAMM laptop in B, run the test, then click **Back to V8
+Baseline** and run the same k and seed. The dashed reference line is the other
+mode's most recent recorded run.
+
+### Stop and clean up
+
+Ctrl+C the collector (it stops k6 and closes the recording), then remove the
+container:
+
+```bash
+docker rm -f samm-demo
+```
+
+### Flags
+
+| Flag | Default | |
+|---|---|---|
+| `--label` | the container name | name on the page and in recording file names |
+| `--mode` | `samm` | `samm` or `baseline`: the mode the page starts in |
+| `--port` | `9100` | the collector's own port |
+| `--replay <file>` | | play a recording instead of sampling; no Docker or k6 |
+| `--k`, `--seed`, `--minutes` | `2.5`, `2025`, `3` | defaults in the run form |
+| `--warmup` | `false` | start SAMM with its floors pre-faulted |
+| `--window` | `5` | rolling latency window, seconds |
+| `--container` | `samm-demo` | container name |
+| `--server` | `http://127.0.0.1:3000` | server URL |
+| `--k6` | `http://127.0.0.1:6565` | k6 REST API |
+| `--k6-dashboard-port` | `5665` | k6 web dashboard |
 
 ## Two layouts
 
