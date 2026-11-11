@@ -80,6 +80,10 @@ pub fn main() !void {
             std.posix.getenv("SAMM_RECLAIM_POLICY") orelse "none",
         ) orelse .none;
         try engine.init(gpa, policy);
+        // SAMM_SEGMENT_REUSE = any | next, as in the addon.
+        if (std.posix.getenv("SAMM_SEGMENT_REUSE")) |raw| {
+            engine.setSegmentReuse(samm.bump.SegmentReuse.fromString(raw) orelse return error.BadSegmentReuse);
+        }
         for (trace.meta.sites, 0..) |name, i| tokens[i] = engine.intern(name) orelse return error.Intern;
     }
 

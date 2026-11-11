@@ -10,6 +10,7 @@ const Pool = pool_mod.Pool;
 const Budget = pool_mod.Budget;
 
 pub const ReclaimPolicy = pool_mod.ReclaimPolicy;
+pub const SegmentReuse = bump_allocator.SegmentReuse;
 
 // a callsite hash resolve into an ID at start up.
 // this is to avoid using string matching
@@ -59,6 +60,7 @@ pub const Stats = struct {
     slab_exhausted_fallbacks: u64,
     bump_reset_blocked: u64,
     bump_resets: u64,
+    bump_reuses: u64,
     grows: u64,
     committed_bytes: u64,
     ceiling_bytes: u64,
@@ -111,6 +113,11 @@ pub const Engine = struct {
                 spec.use_huge_pages,
             );
         }
+    }
+
+    // how every bump arena picks its next segment (see SegmentReuse)
+    pub fn setSegmentReuse(self: *Engine, reuse: SegmentReuse) void {
+        for (self.bump_arenas) |*arena| arena.reuse = reuse;
     }
 
     pub fn deinit(self: *Engine) void {
@@ -215,12 +222,14 @@ pub const Engine = struct {
     // update the stats
     pub fn stats(self: *Engine) Stats {
         var bump_resets: u64 = 0;
+        var bump_reuses: u64 = 0;
         var bump_oversize: u64 = 0;
         var bump_blocked: u64 = 0;
         var grows: u64 = 0;
 
         for (self.bump_arenas) |arena| {
             bump_resets += arena.resets;
+            bump_reuses += arena.reuses;
             bump_oversize += arena.oversize_fallbacks;
             bump_blocked += arena.reset_blocked;
             grows += arena.grows;
@@ -245,6 +254,7 @@ pub const Engine = struct {
             .slab_exhausted_fallbacks = slab_exhausted,
             .bump_reset_blocked = bump_blocked,
             .bump_resets = bump_resets,
+            .bump_reuses = bump_reuses,
             .grows = grows,
             .committed_bytes = self.budget.committed,
             .ceiling_bytes = self.budget.ceiling,

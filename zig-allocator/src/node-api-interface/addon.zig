@@ -237,6 +237,13 @@ fn allocate(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_val
         // No finalizer. The region reclaims this deterministically at
         // response end, and a strong reference keeps the Buffer alive until
         // then so the detach on close has something to detach.
+        //
+        // V8 counts this Buffer's length as external memory until the detach,
+        // which feeds its major-GC trigger although no collection can free
+        // these bytes. Do NOT cancel that with napi_adjust_external_memory
+        // (tried 2026-11-11): that counter may only give back what the addon
+        // itself added, and V8 13 (Node 24) aborts the process with
+        // "Check failed: amount_before >= -delta" once it is exceeded.
         if (c.napi_create_external_buffer(
             env,
             allocation.bytes.len,
@@ -373,6 +380,7 @@ fn stats(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value 
     setNumber(env, result, "slabExhaustedFallbacks", s.slab_exhausted_fallbacks);
     setNumber(env, result, "bumpResetBlocked", s.bump_reset_blocked);
     setNumber(env, result, "bumpResets", s.bump_resets);
+    setNumber(env, result, "bumpReuses", s.bump_reuses);
     setNumber(env, result, "grows", s.grows);
     setNumber(env, result, "committedBytes", s.committed_bytes);
     setNumber(env, result, "ceilingBytes", s.ceiling_bytes);
@@ -416,6 +424,15 @@ fn reclaimPolicyFromEnv() engine_mod.ReclaimPolicy {
     return samm.pool.ReclaimPolicy.fromString(raw) orelse .none;
 }
 
+/// SAMM_SEGMENT_REUSE = any (default) | next (see bump.zig's SegmentReuse).
+/// Unset keeps the arena's default; an unknown value is refused, because a
+/// typo would otherwise silently benchmark the default.
+fn segmentReuseFromEnv() !?engine_mod.SegmentReuse {
+    const raw = std.posix.getenv("SAMM_SEGMENT_REUSE") orelse return null;
+    if (raw.len == 0) return null; // docker -e NAME="" passes an empty value
+    return engine_mod.SegmentReuse.fromString(raw) orelse error.BadSetting;
+}
+
 export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi_value {
     // One anonymous mapping for the whole pool, reserved here at module load.
     engine.init(gpa, reclaimPolicyFromEnv()) catch |err| {
@@ -429,6 +446,11 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi
         _ = c.napi_throw_error(env, null, "samm allocator: out of memory reserving regions");
         return exports;
     };
+    const reuse = segmentReuseFromEnv() catch {
+        _ = c.napi_throw_error(env, null, "samm allocator: SAMM_SEGMENT_REUSE must be any or next");
+        return exports;
+    };
+    if (reuse) |r| engine.setSegmentReuse(r);
     engine_ready = true;
 
     exportFunction(env, exports, "samm_intern", intern);

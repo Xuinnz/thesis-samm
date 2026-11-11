@@ -133,6 +133,99 @@ test "liveness is tracked per segment, not for the arena as a whole" {
     try std.testing.expectEqual(@as(u64, 0), arena.grows);
 }
 
+test "a pinned next segment is stepped around when another has drained" {
+    var pool = try Pool.init(.none);
+    defer pool.deinit();
+    var budget = Budget{ .committed = 0, .ceiling = floor_ceiling }; // nothing left to grant
+    var arena = try fixture(&pool, &budget);
+    defer arena.deinit(std.testing.allocator);
+
+    // Fill the floor and keep everything alive except segment 1.
+    var i: usize = 0;
+    while (i < floor_segments) : (i += 1) _ = arena.alloc(seg) orelse return error.AllocationRefused;
+    arena.release(1);
+    const committed = budget.committed;
+
+    // The ring's next segment (0) is still live. Segment 1 has drained, so
+    // the cursor goes there: no growth, no refusal, no new budget.
+    const reused = arena.alloc(seg) orelse return error.AllocationRefused;
+    try std.testing.expectEqual(@as(u32, 1), arena.currentSegment());
+    try std.testing.expectEqual(@intFromPtr(pool.region.ptr) + seg, @intFromPtr(reused.ptr));
+    try std.testing.expectEqual(@as(u64, 1), arena.reuses);
+    try std.testing.expectEqual(@as(u64, 0), arena.grows);
+    try std.testing.expectEqual(@as(u64, 0), arena.reset_blocked);
+    try std.testing.expectEqual(committed, budget.committed);
+}
+
+test "ring-only reuse refuses in the same situation" {
+    var pool = try Pool.init(.none);
+    defer pool.deinit();
+    var budget = Budget{ .committed = 0, .ceiling = floor_ceiling };
+    var arena = try fixture(&pool, &budget);
+    defer arena.deinit(std.testing.allocator);
+    arena.reuse = .next;
+
+    var i: usize = 0;
+    while (i < floor_segments) : (i += 1) _ = arena.alloc(seg) orelse return error.AllocationRefused;
+    arena.release(1);
+
+    // Segment 1 is empty, but `next` only ever looks at segment 0.
+    try std.testing.expect(arena.alloc(seg) == null);
+    try std.testing.expectEqual(@as(u64, 1), arena.reset_blocked);
+    try std.testing.expectEqual(@as(u64, 0), arena.reuses);
+}
+
+test "a drained current segment is rewound in place" {
+    var pool = try Pool.init(.none);
+    defer pool.deinit();
+    var budget = Budget{ .committed = 0, .ceiling = floor_ceiling };
+    var arena = try fixture(&pool, &budget);
+    defer arena.deinit(std.testing.allocator);
+
+    // Everything stays alive except the object in the last segment.
+    var i: usize = 0;
+    while (i < floor_segments) : (i += 1) _ = arena.alloc(seg) orelse return error.AllocationRefused;
+    const last = arena.currentSegment();
+    arena.release(last);
+
+    // Segment 0 is live and nothing else has drained but the full segment the
+    // cursor is standing in: it starts that one again from the top.
+    const again = arena.alloc(seg) orelse return error.AllocationRefused;
+    try std.testing.expectEqual(last, arena.currentSegment());
+    try std.testing.expectEqual(@intFromPtr(pool.region.ptr) + @as(usize, last) * seg, @intFromPtr(again.ptr));
+    try std.testing.expectEqual(@as(u64, 0), arena.grows);
+    try std.testing.expectEqual(@as(u64, 0), arena.reset_blocked);
+}
+
+test "a live segment is never reused, whichever one drained" {
+    var pool = try Pool.init(.none);
+    defer pool.deinit();
+    var budget = Budget{ .committed = 0, .ceiling = floor_ceiling };
+    var arena = try fixture(&pool, &budget);
+    defer arena.deinit(std.testing.allocator);
+
+    // Stamp each held buffer, drain one segment, and allocate through it many
+    // times: the stamps in the live segments must survive.
+    var held: [floor_segments][]u8 = undefined;
+    for (&held, 0..) |*slot, n| {
+        slot.* = arena.alloc(seg) orelse return error.AllocationRefused;
+        @memset(slot.*, @intCast(n + 1));
+    }
+    arena.release(2);
+
+    var round: usize = 0;
+    while (round < 100) : (round += 1) {
+        const bytes = arena.alloc(seg) orelse return error.AllocationRefused;
+        try std.testing.expectEqual(@as(u32, 2), arena.currentSegment());
+        @memset(bytes, 0xff);
+        arena.release(2);
+    }
+    for (held, 0..) |slot, n| {
+        if (n == 2) continue;
+        for (slot) |byte| try std.testing.expectEqual(@as(u8, @intCast(n + 1)), byte);
+    }
+}
+
 test "payloads are cache-line aligned" {
     var pool = try Pool.init(.none);
     defer pool.deinit();

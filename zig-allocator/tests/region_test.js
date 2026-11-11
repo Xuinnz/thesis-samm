@@ -149,6 +149,19 @@ check('an unscoped allocation still works, via the GC-driven path', () => {
   );
 });
 
+check('an unknown SAMM_SEGMENT_REUSE is refused at load, not silently defaulted', () => {
+  // Read once, at load, so each value needs its own process.
+  const { execFileSync } = require('child_process');
+  const load = (value) => execFileSync(
+    process.execPath,
+    ['-e', `require(${JSON.stringify(ADDON_PATH)}).samm_stats()`],
+    { env: { ...process.env, SAMM_SEGMENT_REUSE: value }, stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  assert.throws(() => load('nxt'), /must be any or next/);
+  load('any');
+  load('next');
+});
+
 console.log(`\nstats: ${JSON.stringify(addon.samm_stats())}`);
 
 if (failures > 0) {

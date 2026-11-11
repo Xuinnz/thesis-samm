@@ -139,6 +139,7 @@ if [ "${SUMMARY_ONLY:-0}" != "1" ]; then
         samm)     run_condition "$label" "docker/samm-environment/Dockerfile" "samm-enabled:bench" "rep-samm" \
                     -e SAMM_ALLOCATOR_ENABLED=true -e LD_PRELOAD="$JEMALLOC_SO" \
                     -e SAMM_RECLAIM_POLICY=none -e SAMM_WARMUP=false \
+                    -e SAMM_SEGMENT_REUSE="${SAMM_SEGMENT_REUSE:-}" \
                     "${SAMM_EXTRA[@]}" || echo "[[ $label FAILED ]]" ;;
       esac
     done

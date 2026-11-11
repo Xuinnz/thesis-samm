@@ -9,6 +9,26 @@ const Budget = pool_mod.Budget;
 // it makes sure an object will get the least cache lines needed possible
 pub const alignment = 64;
 
+// Which drained segment (one whose objects have all died) the cursor moves to
+// when the current segment is full.
+pub const SegmentReuse = enum {
+    // Only the next one in the ring. If it is still pinned by a single live
+    // object the arena grows, or refuses when the budget is spent, even while
+    // other segments sit empty. The original behaviour, kept for ablation.
+    next,
+    // The next one in the ring if it has drained, otherwise the lowest drained
+    // one anywhere (the current segment included), and only then growth.
+    // Measured on the replayed traces against `next`: fallbacks 16,536 -> 4,337
+    // on mix and 29,150 -> 0 on ingest, with fewer segments ever touched.
+    // (Always taking the lowest drained segment first was tried too: same
+    // fallbacks and footprint as this, for many more segment switches.)
+    any,
+
+    pub fn fromString(name: []const u8) ?SegmentReuse {
+        return std.meta.stringToEnum(SegmentReuse, name);
+    }
+};
+
 pub const Arena = struct {
     pool: *Pool,
     budget: *Budget,
@@ -31,8 +51,12 @@ pub const Arena = struct {
     // Live objects per segment. Indexed by segment, length `max_segments`.
     live: []u32,
 
+    reuse: SegmentReuse = .any,
+
     resets: u64 = 0,
     grows: u64 = 0,
+    // Times the cursor moved onto a drained segment out of ring order.
+    reuses: u64 = 0,
     // Requests refused because the next segment was still live and the budget
     // could not grant another. Non-zero means this arena is under-provisioned
     // for the live workload.
@@ -153,6 +177,10 @@ pub const Arena = struct {
             return true;
         }
 
+        // the next segment is pinned, but another one may have drained: a single
+        // straggler must not cost a whole new segment, or a fallback.
+        if (self.reuse == .any and self.enterLowestDrained()) return true;
+
         // the next segment that would be used is still live, that means we cant reuse it yet.
         // this checks if we still have elastic budget and memory to do so
         if (self.granted_segments < self.max_segments and
@@ -165,6 +193,25 @@ pub const Arena = struct {
             return true;
         }
         // if no free segments and no more elastic budget. we cannot advance and fallback to system malloc
+        return false;
+    }
+
+    // moves the cursor to the lowest-indexed granted segment with no live
+    // objects. Same safety rule as the ring: a segment is only written again
+    // once everything allocated in it has died. Runs once per segment change,
+    // over at most max_segments counters.
+    fn enterLowestDrained(self: *Arena) bool {
+        var i: u32 = 0;
+        while (i < self.granted_segments) : (i += 1) {
+            if (self.live[i] != 0) continue;
+            // i is past the high-water mark and the budget cannot cover it;
+            // every later segment would cost more.
+            if (!self.chargeSegment(i)) return false;
+            if (i < self.segment) self.resets += 1;
+            self.reuses += 1;
+            self.enter(i);
+            return true;
+        }
         return false;
     }
 
