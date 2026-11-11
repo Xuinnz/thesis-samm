@@ -3,6 +3,8 @@ const std = @import("std");
 const c = @import("napi.zig").c;
 const samm = @import("samm");
 const engine_mod = samm.engine;
+const weights = samm.weights;
+const bump_alignment = samm.bump.alignment;
 
 const gpa = std.heap.c_allocator;
 
@@ -45,13 +47,89 @@ const max_regions = 8192;
 
 const RegionEntry = struct {
     handle: engine_mod.Handle,
+    /// A Buffer (detach mode), a chunk's ArrayBuffer (chunk mode), or null for
+    /// an object that is only a view into its segment (view mode).
     ref: c.napi_ref,
+    is_chunk: bool = false,
 };
+
+// ---------------------------------------------------------------------------
+// BUFFER MODES
+//
+// Creating an external Buffer costs V8 about a microsecond; the bridge call
+// and the engine together cost about 30 ns. A request that allocates hundreds
+// of small objects (batch.js) therefore spends nearly all of its allocation
+// time on V8 object creation. The two extra modes replace most of those
+// Buffers with typed-array views, which cost tens of nanoseconds. They only
+// apply to region-scoped allocations from bump arenas; everything else takes
+// the detach path whatever the mode.
+//
+// SAMM_BUFFER_MODE =
+//   detach  (default) one external Buffer per object, detached when its
+//           region closes. An escaped reference reads as empty from then on.
+//   chunk   each region carves private chunks out of the arena and its objects
+//           are views into its own chunks; one ArrayBuffer per chunk, detached
+//           when the region closes. Same guarantee as detach, and a view's
+//           `.buffer` exposes that request's chunk and nothing else.
+//   view    one ArrayBuffer per SEGMENT, shared by every request allocating in
+//           it and detached only when the segment is recycled. The cheapest,
+//           and the weakest: an escaped view stays readable until its segment
+//           is recycled, and `.buffer` exposes the whole segment, other
+//           requests' bytes included. Kept to measure the upper bound.
+const BufferMode = enum { detach, chunk, view };
+var buffer_mode: BufferMode = .detach;
+
+const n_bump = weights.bump_arenas.len;
+const max_bump_segments = blk: {
+    var m: u32 = 1;
+    for (weights.bump_arenas) |a| m = @max(m, a.max_segments);
+    break :blk m;
+};
+
+/// One region's current chunk in one bump arena (chunk mode).
+const Chunk = struct {
+    ref: c.napi_ref = null,
+    base: usize = 0, // offset into the pool
+    cap: usize = 0,
+    used: usize = 0,
+    /// Size of the next chunk this region opens here; doubles up to the cap.
+    next_bytes: usize = first_chunk_bytes,
+    /// Allocations this region has made from this arena.
+    seen: u32 = 0,
+    /// Identifies this chunk's ArrayBuffer to the JS wrapper.
+    serial: u32 = 0,
+};
+
+/// A region's first chunk. Later ones double, up to a quarter of the arena's
+/// segment, so a request that allocates a lot converges on a few ArrayBuffers
+/// while one that allocates little wastes little.
+const first_chunk_bytes = 64 * 1024;
+const chunk_segment_fraction = 4;
+/// An object larger than 1/this of its chunk (chunk mode) or segment (view
+/// mode) gains nothing from sharing an ArrayBuffer and takes the detach path.
+const min_objects_per_buffer = 4;
 
 const Region = struct {
     open: bool = false,
     entries: std.ArrayList(RegionEntry) = .{},
+    chunks: [n_bump]Chunk = [_]Chunk{.{}} ** n_bump,
+    /// Objects served as views (they have no entry of their own).
+    viewed: u32 = 0,
 };
+
+/// view mode: each segment's current ArrayBuffer and the epoch it was made in.
+var seg_refs: [n_bump][max_bump_segments]c.napi_ref = [_][max_bump_segments]c.napi_ref{[_]c.napi_ref{null} ** max_bump_segments} ** n_bump;
+var seg_epochs: [n_bump][max_bump_segments]u32 = [_][max_bump_segments]u32{[_]u32{0} ** max_bump_segments} ** n_bump;
+
+/// Written by samm_allocate_shared for the JS wrapper, which holds a
+/// Uint32Array over it: [0] which ArrayBuffer the offset is relative to (a
+/// serial that changes whenever that buffer is replaced), [1] arena index,
+/// [2] segment (view mode).
+var shared_out: [4]u32 = .{ 0, 0, 0, 0 };
+var buffer_serial: u32 = 0;
+
+const use_exact_path: i32 = -2;
+const refused: i32 = -1;
 
 var regions: []Region = &.{};
 var free_region_ids: []u32 = &.{};
@@ -71,6 +149,10 @@ var region_stats = struct {
     /// A buffer could not be detached on close, so an escaped reference to it
     /// would read recycled memory. Must stay zero.
     detach_failures: u64 = 0,
+    /// Objects handed out as views into a shared ArrayBuffer (chunk and view modes).
+    viewed: u64 = 0,
+    /// ArrayBuffers created for chunks or segments.
+    shared_buffers: u64 = 0,
 }{};
 
 fn regionsInit() !void {
@@ -93,6 +175,8 @@ fn regionOpen() ?u32 {
     const id = free_region_ids[free_region_count];
     regions[id].open = true;
     regions[id].entries.clearRetainingCapacity();
+    regions[id].chunks = [_]Chunk{.{}} ** n_bump;
+    regions[id].viewed = 0;
     region_stats.opened += 1;
     return id;
 }
@@ -101,8 +185,20 @@ fn regionOpen() ?u32 {
 /// of recycled memory (silently: see REGIONS), then returns its space to the
 /// allocator.
 fn reclaimEntry(env: c.napi_env, entry: RegionEntry) void {
+    if (entry.ref == null) {
+        // A view into its segment's ArrayBuffer: nothing of its own to detach.
+        engine.release(entry.handle);
+        return;
+    }
     var value: c.napi_value = undefined;
-    if (c.napi_get_reference_value(env, entry.ref, &value) == c.napi_ok and value != null) {
+    if (entry.is_chunk) {
+        // One detach empties every view the region made into this chunk.
+        if (c.napi_get_reference_value(env, entry.ref, &value) != c.napi_ok or value == null or
+            c.napi_detach_arraybuffer(env, value) != c.napi_ok)
+        {
+            region_stats.detach_failures += 1;
+        }
+    } else if (c.napi_get_reference_value(env, entry.ref, &value) == c.napi_ok and value != null) {
         var array_buffer: c.napi_value = undefined;
         var kind: c.napi_typedarray_type = undefined;
         var length: usize = 0;
@@ -126,7 +222,11 @@ fn regionClose(env: c.napi_env, id: u32) u32 {
     const region = &regions[id];
     for (region.entries.items) |entry| reclaimEntry(env, entry);
 
-    const reclaimed: u32 = @intCast(region.entries.items.len);
+    // Objects, not entries: a chunk is one entry however many views it backs.
+    var reclaimed: u32 = region.viewed;
+    for (region.entries.items) |entry| {
+        if (!entry.is_chunk) reclaimed += 1;
+    }
     region.entries.clearRetainingCapacity();
     region.open = false;
 
@@ -299,6 +399,198 @@ fn allocate(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_val
     return result;
 }
 
+fn int32(env: c.napi_env, value: i32) c.napi_value {
+    var result: c.napi_value = undefined;
+    _ = c.napi_create_int32(env, value, &result);
+    return result;
+}
+
+/// samm_allocate_shared(token, sizeBytes, regionId) -> offset | -1 | -2
+///
+/// chunk and view modes. On success the object is `sizeBytes` at the returned
+/// offset of the ArrayBuffer `shared_out` identifies, and the JS wrapper makes
+/// the view. -1: no arena could serve it (use a plain Buffer). -2: this
+/// allocation is not one that shares a buffer; call samm_allocate.
+fn allocateShared(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
+    if (!engine_ready) return throw(env, "samm allocator failed to initialize");
+
+    var argv: [3]c.napi_value = undefined;
+    if (!args(env, info, 3, &argv)) return throw(env, "samm_allocate_shared(token, sizeBytes, regionId) expected");
+    var token: u32 = 0;
+    var size_i: i64 = 0;
+    var region_id: i64 = -1;
+    if (c.napi_get_value_uint32(env, argv[0], &token) != c.napi_ok or
+        c.napi_get_value_int64(env, argv[1], &size_i) != c.napi_ok or
+        c.napi_get_value_int64(env, argv[2], &region_id) != c.napi_ok)
+    {
+        return throw(env, "samm_allocate_shared: arguments must be numbers");
+    }
+    if (buffer_mode == .detach or size_i <= 0 or region_id < 0 or
+        region_id >= @as(i64, @intCast(regions.len)) or !regions[@intCast(region_id)].open)
+    {
+        return int32(env, use_exact_path);
+    }
+    const decision = engine.decisionFor(token) orelse return int32(env, use_exact_path);
+    if (decision.policy != .bump) return int32(env, use_exact_path);
+
+    const size: usize = @intCast(size_i);
+    const ai = decision.arena_index;
+    const arena = &engine.bump_arenas[ai];
+    const region = &regions[@intCast(region_id)];
+
+    if (buffer_mode == .view) {
+        if (size * min_objects_per_buffer > arena.segment_bytes) return int32(env, use_exact_path);
+        const allocation = engine.allocate(token, size) orelse return int32(env, refused);
+        const seg = arena.currentSegment();
+        const seg_start = arena.offset + @as(usize, seg) * arena.segment_bytes;
+        if (seg_refs[ai][seg] == null or seg_epochs[ai][seg] != arena.epochs[seg]) {
+            // New, or recycled since its ArrayBuffer was made: cut every old
+            // view off before any of this memory is handed out again.
+            if (seg_refs[ai][seg] != null) {
+                var old: c.napi_value = undefined;
+                if (c.napi_get_reference_value(env, seg_refs[ai][seg], &old) != c.napi_ok or old == null or
+                    c.napi_detach_arraybuffer(env, old) != c.napi_ok)
+                {
+                    region_stats.detach_failures += 1;
+                }
+                _ = c.napi_delete_reference(env, seg_refs[ai][seg]);
+                seg_refs[ai][seg] = null;
+            }
+            var ab: c.napi_value = undefined;
+            if (c.napi_create_external_arraybuffer(env, engine.pool.region.ptr + seg_start, arena.segment_bytes, null, null, &ab) != c.napi_ok or
+                c.napi_create_reference(env, ab, 1, &seg_refs[ai][seg]) != c.napi_ok)
+            {
+                @branchHint(.cold);
+                seg_refs[ai][seg] = null;
+                engine.release(allocation.handle);
+                return int32(env, refused);
+            }
+            seg_epochs[ai][seg] = arena.epochs[seg];
+            region_stats.shared_buffers += 1;
+        }
+        region.entries.append(gpa, .{ .handle = allocation.handle, .ref = null }) catch {
+            @branchHint(.cold);
+            engine.release(allocation.handle);
+            return int32(env, refused);
+        };
+        region_stats.viewed += 1; // counted at close through its entry
+        shared_out[0] = seg_epochs[ai][seg];
+        shared_out[1] = ai;
+        shared_out[2] = seg;
+        return int32(env, @intCast(@intFromPtr(allocation.bytes.ptr) - @intFromPtr(engine.pool.region.ptr) - seg_start));
+    }
+
+    // chunk mode
+    const chunk = &region.chunks[ai];
+    chunk.seen += 1;
+    // A request's first allocation here stays an ordinary Buffer: most
+    // requests make exactly one, and a chunk for it would be pure waste.
+    if (chunk.seen == 1) return int32(env, use_exact_path);
+
+    const chunk_cap = std.mem.alignBackward(usize, arena.segment_bytes / chunk_segment_fraction, bump_alignment);
+    if (size * min_objects_per_buffer > chunk_cap) return int32(env, use_exact_path);
+
+    var start = std.mem.alignForward(usize, chunk.used, bump_alignment);
+    if (chunk.cap == 0 or start + size > chunk.cap) {
+        // Open the region's next chunk. If the arena cannot serve a whole
+        // chunk the object may still fit on its own, so that attempt must not
+        // be counted as a fallback.
+        var want = @max(chunk.next_bytes, std.mem.alignForward(usize, size * min_objects_per_buffer, bump_alignment));
+        want = @min(want, chunk_cap);
+        const blocked = arena.reset_blocked;
+        const refusals = engine.budget.refusals;
+        const allocation = engine.allocate(token, want) orelse {
+            arena.reset_blocked = blocked;
+            engine.budget.refusals = refusals;
+            return int32(env, use_exact_path);
+        };
+        var ab: c.napi_value = undefined;
+        var ref: c.napi_ref = undefined;
+        if (c.napi_create_external_arraybuffer(env, allocation.bytes.ptr, want, null, null, &ab) != c.napi_ok or
+            c.napi_create_reference(env, ab, 1, &ref) != c.napi_ok)
+        {
+            @branchHint(.cold);
+            engine.release(allocation.handle);
+            return int32(env, use_exact_path);
+        }
+        region.entries.append(gpa, .{ .handle = allocation.handle, .ref = ref, .is_chunk = true }) catch {
+            @branchHint(.cold);
+            _ = c.napi_delete_reference(env, ref);
+            engine.release(allocation.handle);
+            return int32(env, use_exact_path);
+        };
+        buffer_serial +%= 1;
+        chunk.ref = ref;
+        chunk.base = @intFromPtr(allocation.bytes.ptr) - @intFromPtr(engine.pool.region.ptr);
+        chunk.cap = want;
+        chunk.used = 0;
+        chunk.next_bytes = @min(want * 2, chunk_cap);
+        chunk.serial = buffer_serial;
+        region_stats.shared_buffers += 1;
+        start = 0;
+    }
+    chunk.used = start + size;
+    region.viewed += 1;
+    region_stats.viewed += 1;
+    shared_out[0] = chunk.serial;
+    shared_out[1] = ai;
+    return int32(env, @intCast(start));
+}
+
+/// samm_shared_buffer(regionId) -> the ArrayBuffer the last samm_allocate_shared
+/// offset refers to (the JS wrapper asks only when `shared_out[0]` changed).
+fn sharedBuffer(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
+    var argv: [1]c.napi_value = undefined;
+    if (!args(env, info, 1, &argv)) return throw(env, "samm_shared_buffer(regionId) expected");
+    var region_id: i64 = -1;
+    _ = c.napi_get_value_int64(env, argv[0], &region_id);
+    const ai = shared_out[1];
+    var ref: c.napi_ref = null;
+    if (buffer_mode == .view) {
+        ref = seg_refs[ai][shared_out[2]];
+    } else if (region_id >= 0 and region_id < @as(i64, @intCast(regions.len))) {
+        ref = regions[@intCast(region_id)].chunks[ai].ref;
+    }
+    var ab: c.napi_value = undefined;
+    if (ref == null or c.napi_get_reference_value(env, ref, &ab) != c.napi_ok) return jsNull(env);
+    return ab;
+}
+
+/// samm_shared_out() -> Uint32Array over `shared_out`
+fn sharedOut(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
+    _ = info;
+    var ab: c.napi_value = undefined;
+    var view: c.napi_value = undefined;
+    if (c.napi_create_external_arraybuffer(env, &shared_out, @sizeOf(@TypeOf(shared_out)), null, null, &ab) != c.napi_ok or
+        c.napi_create_typedarray(env, c.napi_uint32_array, shared_out.len, ab, 0, &view) != c.napi_ok)
+    {
+        return throw(env, "samm allocator: could not expose shared_out");
+    }
+    return view;
+}
+
+/// samm_token_shares(token) -> whether samm_allocate_shared can ever serve it
+/// (a bump call-site, in chunk or view mode), so the wrapper can skip the call.
+fn tokenShares(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
+    var argv: [1]c.napi_value = undefined;
+    if (!args(env, info, 1, &argv)) return throw(env, "samm_token_shares(token) expected");
+    var token: u32 = 0;
+    _ = c.napi_get_value_uint32(env, argv[0], &token);
+    const decision = engine.decisionFor(token);
+    var result: c.napi_value = undefined;
+    _ = c.napi_get_boolean(env, buffer_mode != .detach and decision != null and decision.?.policy == .bump, &result);
+    return result;
+}
+
+/// samm_buffer_mode() -> "detach" | "chunk" | "view"
+fn bufferModeFn(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
+    _ = info;
+    var result: c.napi_value = undefined;
+    const name = @tagName(buffer_mode);
+    _ = c.napi_create_string_utf8(env, name.ptr, name.len, &result);
+    return result;
+}
+
 /// samm_region_open() -> regionId | -1 when no slot is free
 fn regionOpenFn(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
     _ = info;
@@ -394,6 +686,8 @@ fn stats(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value 
     setNumber(env, result, "unscopedAllocations", region_stats.unscoped);
     setNumber(env, result, "regionsExhausted", region_stats.exhausted);
     setNumber(env, result, "detachFailures", region_stats.detach_failures);
+    setNumber(env, result, "viewedAllocations", region_stats.viewed);
+    setNumber(env, result, "sharedBuffers", region_stats.shared_buffers);
 
     return result;
 }
@@ -433,6 +727,13 @@ fn segmentReuseFromEnv() !?engine_mod.SegmentReuse {
     return engine_mod.SegmentReuse.fromString(raw) orelse error.BadSetting;
 }
 
+/// SAMM_BUFFER_MODE = detach (default) | chunk | view (see BUFFER MODES).
+fn bufferModeFromEnv() !BufferMode {
+    const raw = std.posix.getenv("SAMM_BUFFER_MODE") orelse return .detach;
+    if (raw.len == 0) return .detach;
+    return std.meta.stringToEnum(BufferMode, raw) orelse error.BadSetting;
+}
+
 export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi_value {
     // One anonymous mapping for the whole pool, reserved here at module load.
     engine.init(gpa, reclaimPolicyFromEnv()) catch |err| {
@@ -451,10 +752,19 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi
         return exports;
     };
     if (reuse) |r| engine.setSegmentReuse(r);
+    buffer_mode = bufferModeFromEnv() catch {
+        _ = c.napi_throw_error(env, null, "samm allocator: SAMM_BUFFER_MODE must be detach, chunk or view");
+        return exports;
+    };
     engine_ready = true;
 
     exportFunction(env, exports, "samm_intern", intern);
     exportFunction(env, exports, "samm_allocate", allocate);
+    exportFunction(env, exports, "samm_allocate_shared", allocateShared);
+    exportFunction(env, exports, "samm_shared_buffer", sharedBuffer);
+    exportFunction(env, exports, "samm_shared_out", sharedOut);
+    exportFunction(env, exports, "samm_buffer_mode", bufferModeFn);
+    exportFunction(env, exports, "samm_token_shares", tokenShares);
     exportFunction(env, exports, "samm_region_open", regionOpenFn);
     exportFunction(env, exports, "samm_region_close", regionCloseFn);
     exportFunction(env, exports, "samm_warmup", warmup);

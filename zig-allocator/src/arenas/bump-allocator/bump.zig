@@ -50,6 +50,10 @@ pub const Arena = struct {
     cursor: usize = 0,
     // Live objects per segment. Indexed by segment, length `max_segments`.
     live: []u32,
+    // How many times the cursor has started each segment from the top. A
+    // segment's bytes can only be handed out again after this changes, which
+    // is what lets the addon's `view` mode know when to cut old views off.
+    epochs: []u32,
 
     reuse: SegmentReuse = .any,
 
@@ -71,7 +75,10 @@ pub const Arena = struct {
         spec: weights.BumpArena,
     ) !Arena {
         const live = try gpa.alloc(u32, spec.max_segments);
+        errdefer gpa.free(live);
         @memset(live, 0);
+        const epochs = try gpa.alloc(u32, spec.max_segments);
+        @memset(epochs, 0);
         return .{
             .pool = p,
             .budget = b,
@@ -82,11 +89,13 @@ pub const Arena = struct {
             .max_segments = spec.max_segments,
             .granted_segments = spec.floor_segments,
             .live = live,
+            .epochs = epochs,
         };
     }
 
     pub fn deinit(self: *Arena, gpa: std.mem.Allocator) void {
         gpa.free(self.live);
+        gpa.free(self.epochs);
     }
 
     // alloc memory
@@ -237,5 +246,6 @@ pub const Arena = struct {
         }
         self.segment = segment;
         self.cursor = 0;
+        self.epochs[segment] +%= 1;
     }
 };

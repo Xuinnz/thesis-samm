@@ -51,4 +51,12 @@ node tests/steady_state_test.js
 echo -e "\n---> Running Step 7: Deterministic Region Reclamation"
 node tests/region_test.js
 
+# ---------------------------------------------------------------------
+# Step 8: Buffer modes (no overlap, escaped references, isolation)
+# ---------------------------------------------------------------------
+echo -e "\n---> Running Step 8: Buffer Modes"
+for mode in detach chunk view; do
+  SAMM_BUFFER_MODE=$mode node tests/buffer_mode_test.js
+done
+
 echo -e "\n=== Zig Allocator Test Suite Complete ==="
