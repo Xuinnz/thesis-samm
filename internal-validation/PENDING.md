@@ -219,6 +219,39 @@ drift test.
      Either way state in the thesis that reclamation outside a region depends
      on GC timing and can exhaust a bump arena on Node 22.
 
+11. **Done 2026-11-11: bump arenas reuse any drained segment.** When a segment
+   filled, the cursor only tried the NEXT one in the ring; if a single live
+   object pinned it, the arena grew, or fell back to malloc once the budget was
+   spent, while other segments sat empty (and after growing it wrapped to
+   segment 0, skipping the rest). Now it takes the lowest fully drained segment
+   first (`SegmentReuse.any`, the default); the safety rule is unchanged (live
+   count zero). `SAMM_SEGMENT_REUSE=next` restores the old behaviour for a
+   before/after run on the same image (`run_replicates.sh` passes it through).
+   Replayed traces (deterministic counts; `next` reproduces the old numbers
+   exactly): fallbacks 16,536 → 4,337 of 1,273,696 on mix and 29,150 → 0 on
+   ingest; pool committed 563 → 422 MB on process and 75 → 38 MB on ingest;
+   major GCs on mix through the server path, Node 22: ~517 → ~446 (4 repeats
+   each). One Docker run each way on the laptop (k = 2.5, 2 min, seed 2024;
+   host unhealthy, so indicative only): fallbacks 41,723 → 6,273 (1.02 % →
+   0.14 % of allocations), bumpResetBlocked 32,922 → 2,838, peak RSS 999 →
+   927 MB, 748 → 818 req/s, processing p99 1,202 → 1,017 ms, drops 16,867 →
+   7,033. New stat `bumpReuses`. The steady-state test on Node 22 now serves
+   all 20,000 (was 5,986 fallbacks); its grows-vs-resets check still fails
+   (item 10). This changes the treatment, so every earlier SAMM number is from
+   the old ring; the VM runs use the new one. Layer 2's bump-waste estimate
+   (B5) overstates pinning even more now.
+   **Tried and rejected the same day:** keeping region-scoped Buffers out of
+   V8's external-memory counter with `napi_adjust_external_memory`. V8 counts
+   every live arena Buffer as external memory (100 × 1 MB read as 101 MB on
+   Node 22), which feeds its major-GC trigger. Subtracting it cut major GCs by
+   only ~7 % on Node 22, did not change the reported `external` at all, and
+   **aborts the process on Node 24** ("Check failed: amount_before >= -delta":
+   newer V8 only lets an embedder give back what it added). A sound version
+   needs a different Buffer design (e.g. views over one pool-wide ArrayBuffer,
+   which gives up per-Buffer detach): ISMM material, not thesis.
+   **Not yet traced:** the remaining 4,337 mix fallbacks (budget ceiling, or
+   `process` objects up to 16 MB wasting the tails of 29 MB segments).
+
 ## A4. Model fixes before retraining on the VM
 
 **Decided 2026-10-17: fix both** (a) and (b). (a) is implemented on the laptop

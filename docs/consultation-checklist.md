@@ -76,8 +76,8 @@ and 9. Skip definitions she already knows (bump/slab, k-means, THP).
      model at runtime.
    - Allocation: one mmap (2.64 GB of address space); segmented bump (the
      floor is 8 segments, but the ring grows up to the span, 47–122 segments,
-     whenever the next segment is still pinned; a segment is reused only once
-     nothing in it is alive); slab (power-of-two classes,
+     when the next segment is still pinned and no other has drained; a segment
+     is reused only once nothing in it is alive); slab (power-of-two classes,
      bitmaps); global 627 MB budget charged on first touch, refusals → malloc;
      huge pages per arena; zero-copy Buffers.
    - Reclamation: one region per request; scoped buffers have no finalizer and
