@@ -260,6 +260,19 @@ drift test.
    **Not yet traced:** the remaining 4,337 mix fallbacks (budget ceiling, or
    `process` objects up to 16 MB wasting the tails of 29 MB segments).
 
+12. **[decide on the VM] Buffer modes (branch `feat/buffer-views`,
+   2026-11-12).** `SAMM_BUFFER_MODE=chunk` gives each request private chunks
+   and makes its objects views into them, one ArrayBuffer per chunk, detached
+   at request end: the same guarantee as today's `detach` (the default), for
+   far fewer V8 objects. Laptop: CPU per request 1.35 → 1.19 ms and 657-667 →
+   745-756 req/s at k = 2.5 (two alternating pairs); safety tests pass on Node
+   22 and 24; 10 minutes at k = 1.0 with flat memory and no failures. Open:
+   the size of the gain and whether the fallback share rises, both for the VM
+   (`N=10` of each mode before the main study). Region ids now carry a
+   generation, in every mode. Also seen: at k = 2.5, seed 2026, today's SAMM
+   is OOM-killed about 3 minutes in on the laptop, which bears on the stress
+   point and on killed runs. Full report: `docs/buffer-modes-report.md`.
+
 ## A4. Model fixes before retraining on the VM
 
 **Decided 2026-10-17: fix both** (a) and (b). (a) is implemented on the laptop

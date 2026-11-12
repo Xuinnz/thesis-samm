@@ -140,6 +140,7 @@ if [ "${SUMMARY_ONLY:-0}" != "1" ]; then
                     -e SAMM_ALLOCATOR_ENABLED=true -e LD_PRELOAD="$JEMALLOC_SO" \
                     -e SAMM_RECLAIM_POLICY=none -e SAMM_WARMUP=false \
                     -e SAMM_SEGMENT_REUSE="${SAMM_SEGMENT_REUSE:-}" \
+                    -e SAMM_BUFFER_MODE="${SAMM_BUFFER_MODE:-}" \
                     "${SAMM_EXTRA[@]}" || echo "[[ $label FAILED ]]" ;;
       esac
     done

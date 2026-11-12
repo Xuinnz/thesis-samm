@@ -59,23 +59,45 @@ function tokenFor(callSiteId) {
  * @param {number} sizeBytes
  * @returns {Buffer|null}
  */
+// SAMM_BUFFER_MODE (see BUFFER MODES in addon.zig). In chunk and view mode a
+// bump call-site's object is a view into an ArrayBuffer it shares: the addon
+// returns an offset and says, through sharedOut, which buffer it is relative to.
+const BUFFER_MODE = native === null ? 'detach' : native.samm_buffer_mode();
+const sharedOut = BUFFER_MODE === 'detach' ? null : native.samm_shared_out();
+const tokenShares = []; // token -> can samm_allocate_shared ever serve it
+const sharedBuffers = []; // key -> ArrayBuffer
+const sharedSerials = []; // key -> the serial that buffer was fetched under
+
 function allocate(callSiteId, sizeBytes, regionId) {
   if (native === null) return null;
+  const token = tokenFor(callSiteId);
+
+  if (sharedOut !== null && regionId !== undefined && regionId >= 0) {
+    let shares = tokenShares[token];
+    if (shares === undefined) shares = tokenShares[token] = native.samm_token_shares(token);
+    if (shares) {
+      const offset = native.samm_allocate_shared(token, sizeBytes, regionId);
+      if (offset >= 0) {
+        // chunk: one buffer per region and arena. view: one per arena and segment.
+        const key = BUFFER_MODE === 'view' ? sharedOut[1] * 4096 + sharedOut[2] : sharedOut[3] * 16 + sharedOut[1];
+        if (sharedSerials[key] !== sharedOut[0]) {
+          sharedBuffers[key] = native.samm_shared_buffer(regionId);
+          sharedSerials[key] = sharedOut[0];
+        }
+        return Buffer.from(sharedBuffers[key], offset, sizeBytes);
+      }
+      if (offset === -1) return null; // no arena could serve it
+      // -2: this one takes the ordinary path
+    }
+  }
+
   return native.samm_allocate(
-    tokenFor(callSiteId),
+    token,
     sizeBytes,
     regionId === undefined ? -1 : regionId,
   );
 }
 
-/**
- * Opens a reclamation region. Everything allocated against it is released in
- * one deterministic batch by closeRegion(), instead of whenever V8 happens to
- * collect each Buffer.
- *
- * @returns {number} region id, or -1 if none is available (callers then fall
- *   back to the GC-driven path, which is still correct, just not deterministic)
- */
 function openRegion() {
   if (native === null) return -1;
   return native.samm_region_open();
@@ -109,6 +131,7 @@ function stats() {
 
 module.exports = {
   enabled: ENABLED,
+  bufferMode: BUFFER_MODE,
   allocate,
   openRegion,
   closeRegion,
