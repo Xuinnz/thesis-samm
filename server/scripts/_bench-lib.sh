@@ -23,6 +23,9 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 K6_SCENARIO_DIR="$REPO_ROOT/load-generator/k6-scenarios"
 K6_SCENARIO_FILE="samm-load-test.js"
 RESULTS_DIR="${RESULTS_DIR:-$REPO_ROOT/benchmark-results/comparison}"
+# Absolute, always: k6 is started from its scenario directory, so a relative
+# path made it write its summary nowhere and the run was lost at the very end.
+RESULTS_DIR="$(realpath -m "$RESULTS_DIR")"
 
 # --- Container environment (identical across conditions) -------------------
 MEM_LIMIT="${MEM_LIMIT:-1024m}"
