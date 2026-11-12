@@ -43,7 +43,7 @@ node --expose-gc tests/finalizer_test.js
 # Step 6: Steady-state segment reuse under sustained traffic
 # ---------------------------------------------------------------------
 echo -e "\n---> Running Step 6: Steady-State Segment Reuse"
-node tests/steady_state_test.js
+node --expose-gc tests/steady_state_test.js
 
 # ---------------------------------------------------------------------
 # Step 7: Deterministic region reclamation

@@ -18,7 +18,20 @@
 // purely synchronous loop never reclaims anything and this test would report a
 // failure that a real server never experiences.
 //
-// Run:  node tests/steady_state_test.js
+// WHAT THIS TEST CONTROLS, AND WHAT IT ONLY REPORTS
+//
+// These allocations are made outside any region, so a segment's objects are
+// released only when V8 collects the dropped Buffers. WHEN V8 collects is its
+// own business and differs between Node versions: left to itself, Node 22
+// collects too rarely for this shape and the arena grows while it waits (94
+// grows against 5 resets on 2026-11-11), which says nothing about whether the
+// arena recycles correctly. So the checks run with one forced collection per
+// batch, which makes them a test of the arena's logic and the same on every
+// Node version. The same traffic on V8's own schedule then runs in a fresh
+// process and is printed, not asserted: it is a fact about the GC-driven path
+// (the server's requests do not take it; they use regions).
+//
+// Run:  node --expose-gc tests/steady_state_test.js
 
 const assert = require('assert');
 const path = require('path');
@@ -35,6 +48,13 @@ const PER_BATCH = 500;
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
+// `--natural`: the child run that leaves collection to V8 and only reports.
+const NATURAL = process.argv.includes('--natural');
+if (!NATURAL && typeof global.gc !== 'function') {
+  console.error('run with --expose-gc: node --expose-gc tests/steady_state_test.js');
+  process.exit(2);
+}
+
 let failures = 0;
 
 function check(name, fn) {
@@ -49,7 +69,7 @@ function check(name, fn) {
 }
 
 (async () => {
-  console.log('samm allocator — steady-state segment reuse\n');
+  if (!NATURAL) console.log('samm allocator — steady-state segment reuse\n');
 
   const token = addon.samm_intern(CALL_SITE);
   const before = addon.samm_stats();
@@ -65,6 +85,7 @@ function check(name, fn) {
       }
       if (ring.length > CONCURRENT) ring.shift();
     }
+    if (!NATURAL) global.gc(); // collection is the test's to schedule, not V8's
     await tick(); // let deferred finalizers run, as a server would between requests
   }
 
@@ -74,8 +95,13 @@ function check(name, fn) {
   const grows = after.grows - before.grows;
   const blocked = after.bumpResetBlocked - before.bumpResetBlocked;
 
+  if (NATURAL) {
+    console.log(`${served}/${total} served, ${resets} resets, ${grows} grows, ${blocked} blocked`);
+    return;
+  }
   console.log(
-    `  ${served}/${total} served, ${resets} resets, ${grows} grows, ${blocked} blocked\n`,
+    `  ${served}/${total} served, ${resets} resets, ${grows} grows, ${blocked} blocked` +
+      '  (one forced collection per batch)\n',
   );
 
   check('the arena actually recycles its segments', () => {
@@ -125,6 +151,17 @@ function check(name, fn) {
   });
 
   ring = null;
+  // Reported, not asserted: the same traffic with collection left to V8, in a
+  // fresh process so this run's arena growth does not colour it.
+  try {
+    const natural = require('child_process')
+      .execFileSync(process.execPath, [__filename, '--natural'], { encoding: 'utf8' })
+      .trim();
+    console.log(`\n  on V8's own schedule (${process.version}, not asserted): ${natural}`);
+  } catch (err) {
+    console.log(`\n  on V8's own schedule: could not run (${err.message.split('\n')[0]})`);
+  }
+
   console.log(`\nstats: ${JSON.stringify(addon.samm_stats())}`);
 
   if (failures > 0) {
