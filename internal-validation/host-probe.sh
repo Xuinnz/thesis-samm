@@ -168,6 +168,18 @@ if [ "$MODE" = "k6-only" ]; then
 fi
 
 # 2-3. V8 microbench and GC timing, pinned to one core, against the reference.
+#      The workload is a fixed trace kept in git (microbench/probe-trace, the
+#      2026-09-19 mix), not the current characterization's, so the probe measures
+#      the same thing on every machine and after every retrain. The native
+#      replayer is built here if this checkout has never built it.
+if [ ! -x "$MB/.out/engine_bench" ]; then
+  mkdir -p "$MB/.out"
+  ( cd "$MB" && zig build-exe -O ReleaseFast -target x86_64-linux-gnu.2.36 -lc \
+      --dep samm -Mroot=engine_bench.zig \
+      -O ReleaseFast -target x86_64-linux-gnu.2.36 -Msamm=../src/root.zig \
+      -femit-bin=.out/engine_bench ) > "$OUT/engine_bench-build.log" 2>&1 \
+    || { echo "could not build engine_bench (see $OUT/engine_bench-build.log)" | tee "$OUT/verdict.txt"; exit 1; }
+fi
 bench() {
   local out="$1"; shift; local envs=()
   while [[ "$1" != "--" ]]; do envs+=(-e "$1"); shift; done; shift
@@ -175,9 +187,9 @@ bench() {
     -e SAMM_APP_ROOT=/app -e SAMM_RECLAIM_POLICY=none "${envs[@]}" --entrypoint sh samm-enabled:bench -c "$*" > "$out"
 }
 bench "$OUT/native.jsonl" LD_PRELOAD=$JEMALLOC -- \
-  "./.out/engine_bench .out/traces/mix engine 3 0 1 && ./.out/engine_bench .out/traces/mix malloc 3 1 1"
+  "./.out/engine_bench probe-trace/mix engine 3 0 1 && ./.out/engine_bench probe-trace/mix malloc 3 1 1"
 bench "$OUT/v8.jsonl" LD_PRELOAD=$JEMALLOC SAMM_ALLOCATOR_ENABLED=false BENCH_MALLOC=jemalloc -- \
-  "node --expose-gc js_bench.js .out/traces/mix v8 3 0 1 && node --expose-gc js_bench.js .out/traces/mix v8 3 1 1"
+  "node --expose-gc js_bench.js probe-trace/mix v8 3 0 1 && node --expose-gc js_bench.js probe-trace/mix v8 3 1 1"
 echo "k6_startup_s $K6S" > "$OUT/k6_startup.txt"
 
 K6S=$K6S K6_LIMIT=$K6_LIMIT MODE=$MODE CLOCK_OK=$CLOCK_OK CLOCK_LINE="$CLOCK_LINE" python3 - "$MB/results" "$OUT" "${PROBE_REFERENCE:-}" <<'PY' | tee "$OUT/verdict.txt"

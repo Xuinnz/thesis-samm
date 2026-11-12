@@ -1,0 +1,26 @@
+{
+  "name": "mix",
+  "sites": [
+    "batch.js:batchRoute",
+    "cache.js:cacheRoute",
+    "ingest.js:ingestRoute",
+    "process.js:processRoute",
+    "fetch.js:fetchRoute",
+    "aggregate.js:aggregateRoute"
+  ],
+  "escaping": [
+    false,
+    false,
+    false,
+    false,
+    false,
+    true
+  ],
+  "n_events": 1335099,
+  "n_allocs": 1273696,
+  "n_scopes": 30000,
+  "requests_used": 29992,
+  "max_concurrent_requests": 347,
+  "total_bytes": 65680156183,
+  "peak_live_bytes": 648434345
+}
