@@ -190,8 +190,13 @@ drift test.
    this. Decide before the VM retrain: keep it (state it in the thesis), or
    charge every floor against the budget at init (a behaviour change, so it
    needs re-running anything compared against the current allocator).
-10. **[decide] `run_tests.sh` had been stopping at step 1, hiding a
-   steady-state failure (found 2026-11-02, cause found 2026-11-03).** The
+10. **Done 2026-11-13 (option a): the test forces one collection per batch, so
+   its checks test the arena's logic and pass on Node 22 and 24 (limit
+   unchanged), and it prints the natural-schedule numbers from a fresh process
+   without asserting on them (Node 22: 94 grows against 5 resets, all 20,000
+   served). `run_tests.sh` now runs to the end. Still to state in the thesis:
+   reclamation outside a region depends on GC timing.** `run_tests.sh` had been stopping at step 1, hiding a
+   steady-state failure (found 2026-11-02, cause found 2026-11-03). The
    compiler fixture test still expected a too-small pool to be rejected
    (floors are scaled to 70 % of the pool now); fixed. With it passing, steps
    2-5 and 7 pass and step 6 fails: `steady_state_test.js`, "recycling is
