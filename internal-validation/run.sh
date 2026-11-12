@@ -23,6 +23,8 @@
 #   RESULTS_DIR  default internal-validation/results/<experiment>-<timestamp>
 #   HOST_PORT    default 3000
 #   SKIP_BUILD   1 = reuse the existing images instead of rebuilding them
+#   CPUSET_CPUS  core(s) the server container is pinned to (unset = not pinned)
+#   K6_TASKSET   core(s) k6 is pinned to, e.g. 2,3 (unset = not pinned)
 #   POLL_SAMM_STATS  1 = for the samm config, also record /samm/stats once a second
 #                (allocator.jsonl: fallbacks, budget refusals, bumpResetBlocked, detach
 #                failures...). Off by default: it adds one request per second to the
@@ -174,6 +176,7 @@ for CONFIG in "${CONFIGS[@]}"; do
   docker rm -f "$CURRENT" >/dev/null 2>&1
   docker run -d --name "$CURRENT" \
     --memory=1024m --memory-swap=1024m --memory-swappiness=0 --cpus=1.0 \
+    ${CPUSET_CPUS:+--cpuset-cpus="$CPUSET_CPUS"} \
     -p "$HOST_PORT:3000" \
     -e SHADOW_PROFILER_ENABLED=false -e SAMM_TELEMETRY=false \
     -e PROCESS_MAX_BYTES="$PROCESS_MAX_BYTES" -e HOLD_SCALE="$HOLD_SCALE" -e PROCESS_HOLD_MS="$PROCESS_HOLD_MS" \
@@ -211,7 +214,7 @@ for CONFIG in "${CONFIGS[@]}"; do
     cd "$SCEN" && \
     BASE_URL="http://127.0.0.1:$HOST_PORT" SEED="$SEED" HOLD_SCALE="$HOLD_SCALE" PROCESS_HOLD_MS="$PROCESS_HOLD_MS" \
     CONFIG_LABEL="$CONFIG" SUMMARY_PATH="$OUT/summary.json" K6_CSV_TIME_FORMAT=unix_milli \
-    k6 run --quiet --out "csv=$OUT/raw.csv.gz" "$SCRIPT"
+    ${K6_TASKSET:+taskset -c "$K6_TASKSET"} k6 run --quiet --out "csv=$OUT/raw.csv.gz" "$SCRIPT"
   ) > "$OUT/k6.log" 2> "$OUT/k6-stderr.log"
   K6_RC=$?
   END_WALL=$(date +%s%3N)
@@ -238,6 +241,7 @@ json.dump({
     'process_max_bytes': $PROCESS_MAX_BYTES, 'seed': $SEED,
     'samm_workload_mismatch_override': ${#SAMM_MISMATCH[@]} > 0 and '$CONFIG' == 'samm',
     'container_limits': {'memory': '1024m', 'swap': 'off', 'cpus': 1.0},
+    'pinning': {'server_cpuset': '${CPUSET_CPUS:-}' or None, 'k6_taskset': '${K6_TASKSET:-}' or None},
     'k6_exit_code': $K6_RC, 'start_wall_ms': $START_WALL, 'end_wall_ms': $END_WALL,
     'container_end_state': {'status': '$C_STATUS', 'oom_killed': '$C_OOM' == 'true', 'exit_code': int('$C_EXIT')},
     'host': {'cpu_model': cpu, 'nproc': os.cpu_count(), 'kernel': platform.release(),

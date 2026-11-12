@@ -1,0 +1,9 @@
+# Python environment for preprocessing, the ML refinery, the oracle analysis
+# and the statistics:  python3 -m venv venv && venv/bin/pip install -r requirements.txt
+# Pinned to the versions the routing table was produced with (Python 3.12).
+numpy==2.5.2
+pandas==3.0.5
+scikit-learn==1.9.0
+scipy==1.18.1
+# plots for internal-validation/analysis
+matplotlib>=3.7

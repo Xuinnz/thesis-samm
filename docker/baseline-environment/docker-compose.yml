@@ -72,6 +72,9 @@ services:
                             # stronger guarantee than mem_swappiness alone)
     mem_swappiness: 0
     cpus: 1.0
+    # Optional core pinning (the VM: server on core 1, k6 on cores 2-3 through
+    # K6_TASKSET). Empty means not pinned.
+    cpuset: "${CPUSET_CPUS:-}"
 
   # ---------------------------------------------------------------
   # Final benchmark condition: profiler OFF. Run this 100 times per

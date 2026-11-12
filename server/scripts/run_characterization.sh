@@ -187,7 +187,7 @@ fi
 log "Step 5/7: Running k6 (${SIMULATION_MINUTES} minutes, LOAD_K=${LOAD_K}: MAX_RPS=${MAX_RPS}, HOLD_SCALE=${HOLD_SCALE}, PROCESS_HOLD_MS=${PROCESS_HOLD_MS}, VUs ${PRE_ALLOCATED_VUS}/${MAX_VUS}, seed ${SCHEDULE_SEED:-random})..."
 (
     cd "$K6_SCENARIO_DIR"
-    k6 run \
+    ${K6_TASKSET:+taskset -c "$K6_TASKSET"} k6 run \
         -e BASE_URL="$BASE_URL" \
         -e HOLD_SCALE="$HOLD_SCALE" \
         -e PROCESS_HOLD_MS="$PROCESS_HOLD_MS" \

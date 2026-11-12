@@ -157,7 +157,7 @@ log "Server is healthy after ${elapsed}s."
 log "Step 5/8: Starting k6 in the background (backstop duration: ${BACKSTOP_MINUTES}m, MAX_RPS=${MAX_RPS})..."
 (
     cd "$K6_SCENARIO_DIR"
-    exec timeout "${BACKSTOP_MINUTES}m" k6 run \
+    exec timeout "${BACKSTOP_MINUTES}m" ${K6_TASKSET:+taskset -c "$K6_TASKSET"} k6 run \
         -e BASE_URL="$BASE_URL" \
         -e HOLD_SCALE="$HOLD_SCALE" \
         -e PROCESS_HOLD_MS="$PROCESS_HOLD_MS" \

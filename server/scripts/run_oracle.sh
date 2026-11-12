@@ -106,6 +106,7 @@ log "Step 2/5: Starting the oracle container (forced GC every ${SAMM_ORACLE_GC_M
 docker run -d --name "$CONTAINER" \
     -p 3000:3000 \
     --memory 1024m --memory-swap 1024m --memory-swappiness 0 --cpus 1.0 \
+    ${CPUSET_CPUS:+--cpuset-cpus "$CPUSET_CPUS"} \
     -e SHADOW_PROFILER_ENABLED=false \
     -e SAMM_ORACLE=true \
     -e SAMM_ORACLE_GC_MS="$SAMM_ORACLE_GC_MS" \
@@ -133,7 +134,7 @@ log "Healthy after ${elapsed}s; workload fingerprint $("$PYTHON_BIN" -c "import 
 log "Step 3/5: Running k6 (${SIMULATION_MINUTES} min, MIN_RPS=${MIN_RPS}, MAX_RPS=${MAX_RPS}, HOLD_SCALE=${HOLD_SCALE}, PROCESS_HOLD_MS=${PROCESS_HOLD_MS}, seed ${SCHEDULE_SEED:-random})..."
 (
     cd "$K6_SCENARIO_DIR"
-    k6 run --quiet \
+    ${K6_TASKSET:+taskset -c "$K6_TASKSET"} k6 run --quiet \
         -e BASE_URL="$BASE_URL" \
         -e HOLD_SCALE="$HOLD_SCALE" \
         -e PROCESS_HOLD_MS="$PROCESS_HOLD_MS" \
