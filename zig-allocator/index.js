@@ -79,7 +79,7 @@ function allocate(callSiteId, sizeBytes, regionId) {
       const offset = native.samm_allocate_shared(token, sizeBytes, regionId);
       if (offset >= 0) {
         // chunk: one buffer per region and arena. view: one per arena and segment.
-        const key = BUFFER_MODE === 'view' ? sharedOut[1] * 4096 + sharedOut[2] : regionId * 16 + sharedOut[1];
+        const key = BUFFER_MODE === 'view' ? sharedOut[1] * 4096 + sharedOut[2] : sharedOut[3] * 16 + sharedOut[1];
         if (sharedSerials[key] !== sharedOut[0]) {
           sharedBuffers[key] = native.samm_shared_buffer(regionId);
           sharedSerials[key] = sharedOut[0];

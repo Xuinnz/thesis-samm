@@ -223,6 +223,26 @@ check('objects are counted once, nothing fails to detach, regions do not leak', 
   }
 });
 
+check('a region id that outlived its region cannot join the request holding the slot now', () => {
+  // A handler still running after its client disconnected holds a closed
+  // region's id. The slot is reused straight away.
+  const stale = samm.openRegion();
+  samm.allocate('batch.js:batchRoute', 4096, stale);
+  samm.closeRegion(stale);
+  const current = openRequest();
+  for (let j = 0; j < 4; j += 1) allocateInto(current, 'batch.js:batchRoute', 4096);
+
+  const unscopedBefore = samm.stats().unscopedAllocations;
+  const late = samm.allocate('batch.js:batchRoute', 4096, stale);
+  assert.ok(late !== null);
+  assert.strictEqual(samm.stats().unscopedAllocations, unscopedBefore + 1, 'the late allocation joined a region');
+  assert.ok(!current.objects.some((o) => o.buffer.buffer === late.buffer), 'it shares an ArrayBuffer with the new request');
+  assert.strictEqual(samm.closeRegion(stale), 0, 'a stale id closed the new request\'s region');
+
+  samm.closeRegion(current.region);
+  assert.strictEqual(late.length, 4096, 'closing the new request detached the late allocation');
+});
+
 check('an unscoped allocation is still an ordinary Buffer with its own finalizer', () => {
   const before = samm.stats().unscopedAllocations;
   const buffer = samm.allocate('batch.js:batchRoute', 4096);

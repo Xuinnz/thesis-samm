@@ -44,6 +44,10 @@ const max_call_site_len = 512;
 // than ignored -- if that number is ever non-zero, an escaped reference could
 // read recycled memory and the run should not be trusted.
 const max_regions = 8192;
+const region_index_bits = 13;
+comptime {
+    if (max_regions != 1 << region_index_bits) @compileError("region_index_bits must match max_regions");
+}
 
 const RegionEntry = struct {
     handle: engine_mod.Handle,
@@ -115,7 +119,25 @@ const Region = struct {
     chunks: [n_bump]Chunk = [_]Chunk{.{}} ** n_bump,
     /// Objects served as views (they have no entry of their own).
     viewed: u32 = 0,
+    /// Bumped at every close. A region id handed to JS carries the generation
+    /// it was opened in, so an id that outlived its region (a handler still
+    /// running after its client disconnected) cannot name whichever request
+    /// holds the slot now.
+    generation: u32 = 0,
 };
+
+/// The id samm_region_open() returns: slot index plus the slot's generation.
+fn regionToken(index: u32) i64 {
+    return (@as(i64, regions[index].generation) << region_index_bits) | index;
+}
+
+/// The open region a token names, or null if it has closed since.
+fn regionFor(token: i64) ?u32 {
+    if (token < 0) return null;
+    const index: usize = @intCast(token & (max_regions - 1));
+    if (!regions[index].open or regions[index].generation != token >> region_index_bits) return null;
+    return @intCast(index);
+}
 
 /// view mode: each segment's current ArrayBuffer and the epoch it was made in.
 var seg_refs: [n_bump][max_bump_segments]c.napi_ref = [_][max_bump_segments]c.napi_ref{[_]c.napi_ref{null} ** max_bump_segments} ** n_bump;
@@ -124,7 +146,7 @@ var seg_epochs: [n_bump][max_bump_segments]u32 = [_][max_bump_segments]u32{[_]u3
 /// Written by samm_allocate_shared for the JS wrapper, which holds a
 /// Uint32Array over it: [0] which ArrayBuffer the offset is relative to (a
 /// serial that changes whenever that buffer is replaced), [1] arena index,
-/// [2] segment (view mode).
+/// [2] segment (view mode), [3] the region's slot index.
 var shared_out: [4]u32 = .{ 0, 0, 0, 0 };
 var buffer_serial: u32 = 0;
 
@@ -216,8 +238,8 @@ fn reclaimEntry(env: c.napi_env, entry: RegionEntry) void {
     engine.release(entry.handle);
 }
 
-fn regionClose(env: c.napi_env, id: u32) u32 {
-    if (id >= regions.len or !regions[id].open) return 0;
+fn regionClose(env: c.napi_env, token: i64) u32 {
+    const id = regionFor(token) orelse return 0;
 
     const region = &regions[id];
     for (region.entries.items) |entry| reclaimEntry(env, entry);
@@ -229,6 +251,7 @@ fn regionClose(env: c.napi_env, id: u32) u32 {
     }
     region.entries.clearRetainingCapacity();
     region.open = false;
+    region.generation = (region.generation + 1) & 0x1ffff; // keeps the token a small exact integer
 
     free_region_ids[free_region_count] = id;
     free_region_count += 1;
@@ -322,9 +345,8 @@ fn allocate(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_val
     if (argv[2] != null) {
         _ = c.napi_get_value_int64(env, argv[2], &region_id);
     }
-    const scoped = region_id >= 0 and
-        region_id < @as(i64, @intCast(regions.len)) and
-        regions[@intCast(region_id)].open;
+    const region_index = regionFor(region_id);
+    const scoped = region_index != null;
 
     const allocation = engine.allocate(token, @intCast(size_bytes)) orelse
         return jsNull(env);
@@ -364,7 +386,7 @@ fn allocate(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_val
             return jsNull(env);
         }
 
-        regions[@intCast(region_id)].entries.append(gpa, .{
+        regions[region_index.?].entries.append(gpa, .{
             .handle = allocation.handle,
             .ref = ref,
         }) catch {
@@ -425,18 +447,16 @@ fn allocateShared(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.na
     {
         return throw(env, "samm_allocate_shared: arguments must be numbers");
     }
-    if (buffer_mode == .detach or size_i <= 0 or region_id < 0 or
-        region_id >= @as(i64, @intCast(regions.len)) or !regions[@intCast(region_id)].open)
-    {
-        return int32(env, use_exact_path);
-    }
+    if (buffer_mode == .detach or size_i <= 0) return int32(env, use_exact_path);
+    const region_index = regionFor(region_id) orelse return int32(env, use_exact_path);
     const decision = engine.decisionFor(token) orelse return int32(env, use_exact_path);
     if (decision.policy != .bump) return int32(env, use_exact_path);
 
     const size: usize = @intCast(size_i);
     const ai = decision.arena_index;
     const arena = &engine.bump_arenas[ai];
-    const region = &regions[@intCast(region_id)];
+    const region = &regions[region_index];
+    shared_out[3] = region_index;
 
     if (buffer_mode == .view) {
         if (size * min_objects_per_buffer > arena.segment_bytes) return int32(env, use_exact_path);
@@ -548,8 +568,8 @@ fn sharedBuffer(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi
     var ref: c.napi_ref = null;
     if (buffer_mode == .view) {
         ref = seg_refs[ai][shared_out[2]];
-    } else if (region_id >= 0 and region_id < @as(i64, @intCast(regions.len))) {
-        ref = regions[@intCast(region_id)].chunks[ai].ref;
+    } else if (regionFor(region_id)) |index| {
+        ref = regions[index].chunks[ai].ref;
     }
     var ab: c.napi_value = undefined;
     if (ref == null or c.napi_get_reference_value(env, ref, &ab) != c.napi_ok) return jsNull(env);
@@ -598,7 +618,7 @@ fn regionOpenFn(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi
 
     var result: c.napi_value = undefined;
     const id = regionOpen();
-    _ = c.napi_create_int64(env, if (id) |v| @intCast(v) else -1, &result);
+    _ = c.napi_create_int64(env, if (id) |v| regionToken(v) else -1, &result);
     return result;
 }
 
@@ -617,7 +637,7 @@ fn regionCloseFn(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.nap
     }
 
     var result: c.napi_value = undefined;
-    _ = c.napi_create_uint32(env, regionClose(env, @intCast(id)), &result);
+    _ = c.napi_create_uint32(env, regionClose(env, id), &result);
     return result;
 }
 
