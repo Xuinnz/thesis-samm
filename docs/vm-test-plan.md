@@ -16,7 +16,7 @@ results.
 |---|---|
 | **Main study baseline** | **V8 on jemalloc** vs **SAMM on jemalloc** (two-way, n = 100). Same C allocator underneath, so the arena is the only difference. |
 | **Internal validation** | **All allocators**: glibc, jemalloc, SAMM. Plus the variants when implemented: page-keeping jemalloc, SAMM with `dontneed`, `glibc-tuned`, app-level Buffer pooling. |
-| **Load point** | Profile and train at **k = 1.0**. **Find the VM's near-saturation stress point first** (Phase 5), then lock the main study to it, as the paper states. |
+| **Load point** | Profile and train at **k = 1.0**. **Find the VM's near-saturation stress point first** (Phase 5: the lowest k whose peak rate saturates both configurations), then lock the main study to it, as the paper states. |
 | **Statistical metrics** (per run) | **Throughput:** achieved req/s (k6 `http_reqs` rate, the demo's number). **Latency:** processing time **p99** (report p95 too). **Peak memory:** peak RSS (cgroup `memory.peak`, reset at run start, the demo's number). Everything else on the dashboard is still collected. `_bench-lib.sh` / `run_replicates.sh` already use these definitions. |
 | **Model changes** | Layer 1 **fixed at K = 2** with its limitation stated (2026-10-22), checked against the **reachability oracle** (Phase 4); **derive β from data** at the locked load point (two-pass). |
 | **Timing fix** | Apply the `processing_time` fix to `samm-load-test.js` now: the earlier decision was "only if the realistic benchmark is re-run", and it will be. |
@@ -26,18 +26,33 @@ the realistic schedule (drops count against it); *capacity* = the closed-loop
 maximum (internal validation). The statistics use achieved; at the stress point
 it mostly reflects capacity.
 
-### Still to decide (before Phase 5 ends)
+### Decided 2026-11-13 (written down before any VM data)
 
-- **How to choose the stress point.** Recommended: the highest k at which the
-  jemalloc baseline is CPU-saturated (≥ 98 % of its vCPU, sustained) but still
-  **survives** its 10-minute runs, so all three metrics are comparable for both
-  conditions. Write the rule down **before** looking at SAMM's results, and
-  apply it to the baseline only.
-- **OOM-killed runs.** If a baseline run dies anyway, its metrics cover only
-  the time it survived. Decide in advance: count survival as its own outcome
-  (survival rate; Fisher's exact test), and either exclude killed runs from the
-  three metric tests or analyse them separately. Optionally run a smaller
-  survival experiment at a higher k.
+- **Stress point: saturate both.** The main study runs at the **lowest k whose
+  peak arrival rate (`MAX_RPS`) is at or above the calibrated capacity of BOTH
+  configurations** (jemalloc baseline and SAMM, from the closed-loop
+  calibration). Below that, SAMM's achieved throughput is capped by what was
+  offered rather than by what it can do, and the throughput gap is understated.
+  The rule uses the calibration, a separate experiment, and is the same for
+  both sides. **Guard:** the jemalloc baseline must survive at least 2 of 3
+  pilot runs (3 seeds, 10 minutes each) at that k; if it does not, step down
+  one k level for both and record it.
+- **Killed runs.** A run that is OOM-killed is excluded from that condition's
+  sample for the three metric tests (unequal sample sizes are fine). Survival
+  is reported separately as a count per condition. As a check against
+  survivorship bias, throughput over the full 10-minute window is also reported
+  with killed runs included. If more than about 10 % of a condition's runs die,
+  survival is the headline result and the metric tests carry that caveat.
+- **Statistics: the approved methodology as written.** Shapiro-Wilk and Levene,
+  then an independent-samples t-test, or Mann-Whitney U if an assumption fails;
+  Bonferroni α = 0.017 across the three metrics; relative percentage
+  difference for each metric.
+- **Seeds.** Each of the 100 runs has its own seed, and both conditions in a
+  run share it (`run_replicates.sh`: base seed + run number). The shared seed
+  makes the two samples related, which the independent tests do not use: that
+  makes them conservative (harder to reach significance, never easier). State
+  this in the thesis; a paired test goes in an appendix only if the adviser
+  asks.
 
 ---
 
@@ -135,11 +150,13 @@ it mostly reflects capacity.
 
 1. **Closed-loop capacities:** calibrate all three allocators (internal
    validation's calibration; widen `CAL_VUS` if the VM is faster).
-2. **A short realistic k sweep** for the **jemalloc baseline** (one 10-minute
-   run per k: 1.0, 1.5, 2.0, 2.5, and higher if needed): CPU, drops, peak
-   memory, survival.
-3. **Apply the pre-written rule** (see "Still to decide") to the baseline's
-   results and **lock the main-study k**. Record it with the reasoning.
+2. **Apply the rule** ("Decided 2026-11-13"): take the lowest k whose
+   `MAX_RPS` is at or above both calibrated capacities (k table: 1.0 = 500,
+   1.5 = 750, 2.0 = 1,000, 2.5 = 1,250, 3.0 = 1,500 req/s).
+3. **Baseline pilot at that k:** 3 seeds, 10 minutes each, jemalloc baseline.
+   If fewer than 2 survive, step down one level and repeat. **Lock the
+   main-study k** and record it with the calibration numbers and the pilot
+   outcomes.
 
 ## Phase 6: derive β at the locked load point, then the final table (about a day)
 
@@ -199,10 +216,10 @@ All allocators (glibc, jemalloc, SAMM; plus the variants if ready), final table:
 
 ## Phase 11: statistics and reporting
 
-`stats-eval`: Shapiro-Wilk and Levene, then t-test or Mann-Whitney, or the
-**paired** versions (paired t / Wilcoxon signed-rank), since seeds are paired;
-Bonferroni across the three metrics (α ≈ 0.017); effect sizes and confidence
-intervals; survival rate if any run was killed; the Layer 1 oracle matrix
+`stats-eval`, as the approved methodology states: Shapiro-Wilk and Levene, then
+an independent-samples t-test or Mann-Whitney U; Bonferroni across the three
+metrics (α = 0.017); the relative percentage difference per metric; survival
+counts and full-window throughput if any run was killed; the Layer 1 oracle matrix
 (Phase 4 step 5); figures.
 
 ---

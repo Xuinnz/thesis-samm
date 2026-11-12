@@ -29,9 +29,12 @@ extras, statistics). Decisions locked on 2026-10-17:
 - **Internal validation:** all allocators (glibc, jemalloc, SAMM, plus the
   variants when implemented).
 - **Load point:** profile at k = 1.0; find the VM's near-saturation stress
-  point first, then lock the main study to it (as the paper states). Still to
-  decide: the selection rule (recommended: highest k where the jemalloc
-  baseline is CPU-saturated but survives) and how to treat OOM-killed runs.
+  point first, then lock the main study to it (as the paper states).
+  **Decided 2026-11-13:** the lowest k whose peak rate is at or above BOTH
+  calibrated capacities (so each side's throughput reflects its own ceiling),
+  stepping down one level if the baseline survives fewer than 2 of 3 pilot
+  seeds. Killed runs: excluded from the three tests, survival reported
+  separately, full-window throughput as a check. Rules in the runbook.
 - **Statistical metrics:** throughput = achieved req/s (k6 `http_reqs` rate,
   as on the demo); latency = processing p99 (p95 reported too); peak memory =
   cgroup `memory.peak`. All other dashboard metrics still collected.
@@ -345,10 +348,13 @@ README promises Shapiro-Wilk and Levene, then a t-test or Mann-Whitney U, with
 Bonferroni-adjusted alpha = 0.017 across the three metrics, plus the
 misclassification matrix. The README's version (ML assignment vs compiled
 routing table; 6 of 6 on the diagonal) only checks the compiler; the oracle
-matrix (A4(a), runbook Phase 4) is the accuracy test. Consider (ask the adviser): the same seed
-per pair makes it a paired design (paired t / Wilcoxon signed-rank); report
-effect sizes and confidence intervals; a second baseline doubles the
-comparisons (alpha ≈ 0.008).
+matrix (A4(a), runbook Phase 4) is the accuracy test. **Decided 2026-11-13: the approved
+methodology as written** (independent-samples t-test or Mann-Whitney U, α =
+0.017, relative percentage difference). Seeds: one per run, shared by both
+conditions in that run, different across the 100 runs. The shared seed makes
+the independent tests conservative; say so in the thesis, and add a paired
+test in an appendix only if the adviser asks. A second baseline would double
+the comparisons (alpha ≈ 0.008).
 
 ## A6. Optional for the thesis (also in Part B)
 
@@ -647,6 +653,12 @@ All of the above ran on the laptop (Ryzen 5 6600H, WSL2). It is pilot data now.
   RSS (`memory.peak`). Internal validation covers all allocators. Fix the
   Layer 1 System rule and derive β from data. Runbook: `docs/vm-test-plan.md`.
 - No longer-timeout re-run of the 500-VU stats.
+- 2026-11-13: stress point = lowest k whose peak rate saturates both
+  configurations (baseline must survive 2 of 3 pilot seeds, else one level
+  down); killed runs excluded from the tests with survival reported
+  separately; statistics as the approved methodology states; one seed per run
+  shared by both conditions. Steady-state test: forced collection, natural
+  numbers printed.
 - Layer 1 (2026-10-22): K fixed at 2 for the thesis, limitation stated
   ("all request-scoped or all escaping" workloads); the natural-break rule and
   the use-after-reclaim counter go to Part B. Layer 1's accuracy is measured
