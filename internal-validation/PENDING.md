@@ -710,7 +710,7 @@ All of the above ran on the laptop (Ryzen 5 6600H, WSL2). It is pilot data now.
 
 | Probe | Clock | k6 startup | V8 | V8 + page writes | GC per collection | Result |
 |---|---|---|---|---|---|---|
-| Nov 13 (reference) | 100.00 %, chrony synchronised | 125.4 s | 6,948 ns | 11,582 ns | 1.71 ms | reference recorded; limits: k6 ≤ 138 s, 0.90-1.10x, GC ≤ 1.10x |
+| Nov 13, six runs before any benchmark | 100.00 % each, chrony synchronised | 123.3-131.5 s (median 125.4) | 6,948-7,646 ns (median 7,289.7) | 11,582-12,671 ns (median 12,323.2) | 1.71-1.90 ms (median 1.79) | pooled median is the reference; limits: k6 ≤ 138 s, 0.90-1.10x, GC ≤ 1.10x. Run-to-run spread about ±5 %; the sixth run was the slowest on every check |
 
 ## Things to remember
 

@@ -510,7 +510,16 @@ def compile_table(policy_csv, quotas_json_path, output_zig):
     # Sidecar the server reads at boot. Kept beside the JS wrapper rather than
     # inside the .node binary so a mismatch is reported by Node with a readable
     # message instead of a comptime failure nobody sees at run time.
-    sidecar = os.path.join(REPO_ROOT, "zig-allocator", "workload_fingerprint.json")
+    #
+    # It describes the table just written, so it goes with that table: beside
+    # the JS wrapper for the real one, beside the output file for any other
+    # (a test fixture, a what-if compile). It used to be written into the
+    # repository whatever --output said, so running the test suite replaced the
+    # real table's fingerprint with the fixture's.
+    if os.path.abspath(output_zig) == os.path.abspath(DEFAULT_OUTPUT_ZIG):
+        sidecar = os.path.join(REPO_ROOT, "zig-allocator", "workload_fingerprint.json")
+    else:
+        sidecar = os.path.join(os.path.dirname(os.path.abspath(output_zig)), "workload_fingerprint.json")
     with open(sidecar, "w") as f:
         json.dump(manifest, f, indent=2)
     print(f"  fingerprint file  : {os.path.relpath(sidecar, REPO_ROOT)}")
