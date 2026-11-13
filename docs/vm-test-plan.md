@@ -140,6 +140,23 @@ Scripts and commands: `infra/README.md`.
 3. From then on: probe before every batch and once a day; a failed probe means
    stop and report.
 
+**The VM's reference and limits (set 2026-11-13, before any benchmark).**
+VM `samm-bench`, `t2d-standard-4`, asia-southeast1-b, AMD EPYC 7B13, kernel
+7.0.0-1017-gcp, Docker 29.9.3, Node 22.23.5. Reference in
+`results/probe-reference` on the VM (not in git: fetch a copy).
+
+| Check | Reference | Limit |
+|---|---|---|
+| 0. Clock vs NTP | 100.00 %, chrony synchronised | 99-101 % and synchronised |
+| 1. k6 start-up | 125.4 s (122.6 s on the first attempt) | **≤ 138 s** (1.10 × reference) |
+| 2. V8 microbench, no touch | 6,948 ns per allocation | 0.90-1.10x |
+| 2. V8 microbench, page writes | 11,582 ns per allocation | 0.90-1.10x |
+| 3. GC time per collection | 1.71 ms | ≤ 1.10x |
+
+Every probe on the VM runs with `PROBE_REFERENCE=$HOME/samm-final/results/probe-reference
+K6_STARTUP_LIMIT_S=138 PROBE_CPU=1`. These do not change after a result is
+seen.
+
 ## Phase 4: workload characterization (1-2 days)
 
 1. **Calibrate glibc and jemalloc** (closed loop, no routing table needed):

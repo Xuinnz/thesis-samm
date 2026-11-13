@@ -706,6 +706,12 @@ All of the above ran on the laptop (Ryzen 5 6600H, WSL2). It is pilot data now.
 | Oct 9 07:43 (full) | 98.2 % (tsc) | 62.1 s | 1.05x | 0.97x | 1.04x | fail (clock only); output was in a scratch folder, not kept |
 | Nov 3 (testing the NTP check and reference mode) | 92.1 % vs NTP, 91.6 % vs Windows over the same 20 s (tsc) | 111.4-162.4 s | 1.18-3.69x | 1.05-2.10x | 1.20-3.75x | fail (clock, k6; microbench unstable run to run); scratch output, not kept |
 
+**VM probes** (ratios are to the VM's own reference, `results/probe-reference`):
+
+| Probe | Clock | k6 startup | V8 | V8 + page writes | GC per collection | Result |
+|---|---|---|---|---|---|---|
+| Nov 13 (reference) | 100.00 %, chrony synchronised | 125.4 s | 6,948 ns | 11,582 ns | 1.71 ms | reference recorded; limits: k6 ≤ 138 s, 0.90-1.10x, GC ≤ 1.10x |
+
 ## Things to remember
 
 - **WSL clock drift (laptop only).** The VM clock can run slow by a different
