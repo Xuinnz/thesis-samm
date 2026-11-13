@@ -700,8 +700,16 @@ at 300): expect peak RSS to favour jemalloc in the main study.
 
 *Stress point by the 2026-11-13 rule:* lowest k whose peak rate covers both
 capacities (880 and 1,128) → **k = 2.5** (1,250 req/s; k = 2.0's 1,000 is below
-SAMM's capacity). Pending the survival guard: jemalloc baseline, 3 pilot
-seeds (base 20261113, apart from the main study's), at least 2 must survive.
+SAMM's capacity). Survival guard (jemalloc baseline, pilot seeds 20261114-16,
+apart from the main study's): at k = 2.5, **0 of 3 survived**, each OOM-killed
+with 58-64 % of its requests failed (kernel log: "Memory cgroup out of memory:
+Killed process ... (node)"). Stepped down: at k = 2.0, **3 of 3 survived**
+(peak 858.8 ±107.3 MiB, processing p99 165.5 ±64.9 ms, 758.2 ±5.8 req/s).
+**The main study's stress point is k = 2.0** (peak 1,000 req/s): above the
+baseline's capacity, below SAMM's, so the throughput gap there is the
+baseline's shortfall at peak. The baseline dying 3 of 3 at k = 2.5 is itself a
+result; an optional survival experiment there (about 10 runs each) would show
+it directly.
 
 All six decisions correct on both seeds, and the seeds agree on every site.
 Caveat for the write-up: one clearly escaping site and five clearly

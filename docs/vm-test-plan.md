@@ -200,11 +200,22 @@ change after a benchmark result is seen.
    If fewer than 2 survive, step down one level and repeat. **Lock the
    main-study k** and record it with the calibration numbers and the pilot
    outcomes.
-4. **Choose the buffer mode** at the locked k: `N=10 CONDITIONS=samm` with
-   `SAMM_BUFFER_MODE=detach`, then the same seeds with `chunk`. Compare CPU per
-   request, throughput, processing p99, fallback share and survival
-   (`docs/buffer-modes-report.md`). Fix the choice before Phase 6, because the
-   memory outside the pool, and so β, depends on it.
+   **Result (2026-11-13): k = 2.0 is locked.** Capacities 880 (jemalloc) and
+   1,128 req/s (SAMM), so the rule gave k = 2.5 (1,250 req/s); there the
+   baseline was OOM-killed in 3 of 3 pilot runs (kernel log confirms; 58-64 %
+   of each run's requests failed), so the guard stepped down. At k = 2.0
+   (1,000 req/s) it survived 3 of 3: peak 858.8 ±107.3 MiB, processing p99
+   165.5 ±64.9 ms, 758.2 ±5.8 req/s. Pilot seeds 20261114-16, apart from the
+   main study's. At k = 2.0 the peak rate is above the baseline's capacity but
+   below SAMM's, so the main study's throughput gap is the baseline's
+   shortfall at peak, not the full capacity gap.
+4. **Choose the buffer mode** at the locked k:
+   `K=2.0 N=10 server/scripts/compare_buffer_modes.sh` runs SAMM in `detach`
+   and `chunk` mode on the same ten seeds, alternating which goes first, and
+   prints CPU per request, throughput, processing p99, peak memory, fallback
+   share and survival, with the per-seed differences
+   (`docs/buffer-modes-report.md`). About 5 hours. Fix the choice before
+   Phase 6, because the memory outside the pool, and so β, depends on it.
 
 ## Phase 6: derive β at the locked load point, then the final table (about a day)
 
@@ -244,7 +255,7 @@ All allocators (glibc, jemalloc, SAMM; plus the variants if ready), final table:
 ## Phase 9: external validation, the main study (about 2 days of machine time)
 
 1. **Pilot:** 2-3 runs at the locked k, to confirm stability.
-2. **Main study:** `K=<locked> N=100 CONDITIONS="jemalloc samm" CPUSET_CPUS=1
+2. **Main study:** `K=2.0 N=100 CONDITIONS="jemalloc samm" CPUSET_CPUS=1
    K6_TASKSET=2,3 RESULTS_DIR=benchmark-results/main-study
    server/scripts/run_replicates.sh` (check the plan first with `DRY_RUN=1`):
    **n = 100**, paired seeds (one seed per replicate, shared by both), rotated
