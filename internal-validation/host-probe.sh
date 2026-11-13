@@ -44,6 +44,15 @@ TM=$REPO/datasets/azure-trace-2019/processed/traffic-models
 K6_LIMIT="${K6_STARTUP_LIMIT_S:-80}"
 PROBE_CPU="${PROBE_CPU:-2}"
 
+# Checks 2-3 run in a container. Say so now, not after two minutes of the other
+# checks: on a new machine the usual cause is a login from before this user
+# was added to the docker group.
+if [ "$MODE" != "k6-only" ] && ! docker info >/dev/null 2>&1; then
+  echo "docker is not usable by $USER (docker info failed). If you were just added to the docker group, log out and back in." | tee "$OUT/verdict.txt"
+  echo 'HOST NOT CLEAN' | tee -a "$OUT/verdict.txt"
+  exit 1
+fi
+
 # 0. Clock rate: the monotonic clock (what Node, k6 and the microbench time
 #    with) against an outside clock read at the start and end of the interval.
 #    On 2026-10-04 the WSL clock (clocksource tsc) ran at 92.7 % of real time:
@@ -113,8 +122,9 @@ def chrony():
         return True, ''
     text = subprocess.run(['chronyc', 'tracking'], capture_output=True, text=True, timeout=10).stdout
     open(os.path.join(out, 'chrony.txt'), 'w').write(text)
-    field = dict(l.split(':', 1) for l in text.splitlines() if ':' in l)
-    get = lambda k: field.get(k, '?').strip()
+    # chronyc pads its field names ("Leap status     : Normal")
+    field = {k.strip(): v.strip() for k, v in (l.split(':', 1) for l in text.splitlines() if ':' in l)}
+    get = lambda k: field.get(k, '?')
     synced = get('Leap status') == 'Normal'
     return synced, (f"; chrony {'synchronised' if synced else 'NOT SYNCHRONISED'}, "
                     f"offset {get('System time')}, freq {get('Frequency')}")
