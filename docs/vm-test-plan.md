@@ -234,10 +234,17 @@ change after a benchmark result is seen.
 
 ## Phase 7: microbenchmark (half a day)
 
-`extract_trace.js` on the VM's trace, then `gated_run.sh`: 7 layers × 7 traces,
+`zig-allocator/microbench/gated_run.sh results-vm-<date>`: 7 layers × 7 traces,
 with and without page writes, 5 trials each, plus the 30-trial aggregate cell,
 on one pinned core. Output: ns per allocation, and where an allocation's time
-goes.
+goes. On the VM (where `PROBE_REFERENCE` is set) the gate is the VM's own host
+probe, before and after; the script's older checks compare against the
+laptop's 2026-09-19 run. The traces are extracted from the VM's
+characterization the first time. `SAMM_BUFFER_MODE` reaches the SAMM layers,
+so with the VM's `~/.bashrc` they run in the main study's mode, and each
+results folder has a `run-settings.txt` (image, table hash, buffer mode, core).
+The image must be newer than the table: run after a SAMM benchmark on the
+frozen table.
 
 ## Phase 8: internal validation (2-3 days)
 

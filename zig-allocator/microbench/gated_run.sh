@@ -16,6 +16,11 @@
 # Every probe attempt is kept in its own host-probe-<time>/ directory, and
 # run.sh refuses to write over existing results, so nothing earlier is lost.
 #
+# ON THE BENCHMARK VM (PROBE_REFERENCE set, as its ~/.bashrc does): steps 1, 2
+# and 4 compare against the laptop's 2026-09-19 run, which the VM does not have
+# and should not be judged by. There the gate is the VM's own host probe
+# (internal-validation/host-probe.sh, runbook Phase 3), before and after.
+#
 # Usage: ./gated_run.sh [results-dir]      (default: results-<today>)
 # Last line printed is always "DONE ...".
 
@@ -26,9 +31,29 @@ NEW="$(realpath -m "${1:-results-$(date +%F)}")"
 AGG="$NEW/aggregate-touch-30"
 JEMALLOC=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
 IMAGE="${IMAGE:-samm-enabled:bench}"
-CPU="${CPU:-2}"
+CPU="${CPU:-${PROBE_CPU:-2}}"
 
 mkdir -p "$NEW"
+
+if [ -n "${PROBE_REFERENCE:-}" ]; then
+  echo "$(date +%T) PROBE (VM): host-probe.sh against $PROBE_REFERENCE"
+  "$REPO/internal-validation/host-probe.sh" "$NEW/host-probe-before" 2>&1 | tail -7; PROBE_RC=${PIPESTATUS[0]}
+  if [ "$PROBE_RC" -ne 0 ]; then
+    echo "$(date +%T) probe failed: benchmark NOT run"
+    echo "DONE rc_probe=$PROBE_RC"; exit 0
+  fi
+  echo "$(date +%T) MAIN RUN: all layers x all traces x touch/no-touch, 5 trials + 1 warmup -> $NEW"
+  RESULTS="$NEW" TRIALS=5 WARMUP=1 CPU="$CPU" bash ./run.sh; RC_MAIN=$?
+  echo "$(date +%T) MAIN RUN done rc=$RC_MAIN"
+  echo "$(date +%T) AGGREGATE TOUCH: 30 trials + 1 warmup -> $AGG"
+  RESULTS="$AGG" TRACES=aggregate TOUCH_MODES=1 TRIALS=30 WARMUP=1 CPU="$CPU" bash ./run.sh; RC_AGG=$?
+  echo "$(date +%T) AGGREGATE TOUCH done rc=$RC_AGG"
+  echo "$(date +%T) POST-CHECK (VM): host-probe.sh"
+  "$REPO/internal-validation/host-probe.sh" "$NEW/host-probe-after" 2>&1 | tail -7; RC_AFTER=${PIPESTATUS[0]}
+  echo "DONE rc_probe=0 rc_main=$RC_MAIN rc_agg=$RC_AGG rc_probe_after=$RC_AFTER"
+  exit 0
+fi
+
 sha256sum results/* > "$NEW/results-2026-09-19.sha256"
 echo "$(date +%T) results/ (2026-09-19) checksummed: $(wc -l < "$NEW/results-2026-09-19.sha256") files"
 

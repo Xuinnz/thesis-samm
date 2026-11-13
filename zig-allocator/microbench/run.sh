@@ -24,13 +24,14 @@
 #                                         # run is never overwritten (see the guard below)
 #   TRACES=aggregate TOUCH_MODES=1 TRIALS=30 RESULTS=... ./run.sh   # one cell, more trials
 #   IMAGE=samm-enabled:bench CPU=2 ./run.sh
+#   SAMM_BUFFER_MODE=chunk ./run.sh     # the SAMM layers in that buffer mode (default: detach)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE"
 
 IMAGE="${IMAGE:-samm-enabled:bench}"
-CPU="${CPU:-2}"                 # one pinned core: the study's 1 vCPU, minus CFS throttling noise
+CPU="${CPU:-${PROBE_CPU:-2}}"   # one pinned core: the study's 1 vCPU, minus CFS throttling noise
 TRIALS="${TRIALS:-5}"
 WARMUP="${WARMUP:-1}"
 SCOPES="${SCOPES:-30000}"
@@ -61,6 +62,18 @@ fi
 
 mkdir -p .out "$RESULTS"
 
+# What this run was, beside its numbers.
+{
+  echo "started        : $(date -u +%FT%TZ)"
+  echo "image          : $IMAGE ($(docker image inspect -f '{{.Id}}' "$IMAGE"))"
+  echo "routing table  : $(sha256sum ../src/routing-table/model_weights.zig | cut -d' ' -f1)"
+  echo "buffer mode    : ${SAMM_BUFFER_MODE:-detach (default)}"
+  echo "core           : $CPU"
+  echo "trials, warmup : $TRIALS, $WARMUP"
+  echo "traces         : $TRACES"
+  echo "touch modes    : $TOUCH_MODES"
+} | tee "$RESULTS/run-settings.txt"
+
 echo "== building engine_bench (ReleaseFast, glibc 2.36 to match the image)"
 zig build-exe -O ReleaseFast -target x86_64-linux-gnu.2.36 -lc \
   --dep samm -Mroot=engine_bench.zig \
@@ -83,6 +96,7 @@ run() {   # run <label> <env...> -- <command>
   local rc=0
   docker run --rm --cpuset-cpus="$CPU" --memory=3g --memory-swap=3g \
     -v "$HERE":/bench -w /bench -e SAMM_APP_ROOT=/app -e SAMM_RECLAIM_POLICY=none \
+    -e SAMM_BUFFER_MODE="${SAMM_BUFFER_MODE:-}" \
     "${envs[@]}" --entrypoint sh "$IMAGE" -c "$*" > "$RESULTS/$label.jsonl" || rc=$?
   wc -l < "$RESULTS/$label.jsonl" | xargs printf '   %s trials recorded\n'
   if (( rc != 0 )); then
