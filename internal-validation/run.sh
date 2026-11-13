@@ -25,6 +25,8 @@
 #   SKIP_BUILD   1 = reuse the existing images instead of rebuilding them
 #   CPUSET_CPUS  core(s) the server container is pinned to (unset = not pinned)
 #   K6_TASKSET   core(s) k6 is pinned to, e.g. 2,3 (unset = not pinned)
+#   SAMM_BUFFER_MODE, SAMM_SEGMENT_REUSE  passed to the samm config as set (unset = the
+#                allocator's defaults: detach, any). The VM exports SAMM_BUFFER_MODE=chunk.
 #   POLL_SAMM_STATS  1 = for the samm config, also record /samm/stats once a second
 #                (allocator.jsonl: fallbacks, budget refusals, bumpResetBlocked, detach
 #                failures...). Off by default: it adds one request per second to the
@@ -169,7 +171,8 @@ for CONFIG in "${CONFIGS[@]}"; do
     jemalloc)    EXTRA=(-e LD_PRELOAD="$JEMALLOC_SO") ;;
     samm)        IMAGE=$SAMM_IMAGE
                  EXTRA=(-e SAMM_ALLOCATOR_ENABLED=true -e LD_PRELOAD="$JEMALLOC_SO" -e SAMM_RECLAIM_POLICY=none
-                        -e SAMM_WARMUP=false "${SAMM_MISMATCH[@]}") ;;
+                        -e SAMM_WARMUP=false "${SAMM_MISMATCH[@]}"
+                        -e SAMM_BUFFER_MODE="${SAMM_BUFFER_MODE:-}" -e SAMM_SEGMENT_REUSE="${SAMM_SEGMENT_REUSE:-}") ;;
   esac
 
   log "=== $CONFIG: starting $CURRENT ($IMAGE)"
@@ -242,6 +245,7 @@ json.dump({
     'samm_workload_mismatch_override': ${#SAMM_MISMATCH[@]} > 0 and '$CONFIG' == 'samm',
     'container_limits': {'memory': '1024m', 'swap': 'off', 'cpus': 1.0},
     'pinning': {'server_cpuset': '${CPUSET_CPUS:-}' or None, 'k6_taskset': '${K6_TASKSET:-}' or None},
+    'samm_buffer_mode': ('${SAMM_BUFFER_MODE:-}' or 'detach (default)') if '$CONFIG' == 'samm' else None,
     'k6_exit_code': $K6_RC, 'start_wall_ms': $START_WALL, 'end_wall_ms': $END_WALL,
     'container_end_state': {'status': '$C_STATUS', 'oom_killed': '$C_OOM' == 'true', 'exit_code': int('$C_EXIT')},
     'host': {'cpu_model': cpu, 'nproc': os.cpu_count(), 'kernel': platform.release(),
