@@ -1,0 +1,7 @@
+call_site,seed19870601-gc10ms:escaped_bytes_pct,seed19870601-gc10ms:site_truth,seed2025-gc10ms:escaped_bytes_pct,seed2025-gc10ms:site_truth,truth_agrees
+process.js:processRoute,0.0,request-scoped,0.0,request-scoped,True
+batch.js:batchRoute,0.0,request-scoped,0.0,request-scoped,True
+fetch.js:fetchRoute,0.0,request-scoped,0.0,request-scoped,True
+aggregate.js:aggregateRoute,100.0,escaping,100.0,escaping,True
+ingest.js:ingestRoute,0.0,request-scoped,0.0,request-scoped,True
+cache.js:cacheRoute,0.0,request-scoped,0.0,request-scoped,True

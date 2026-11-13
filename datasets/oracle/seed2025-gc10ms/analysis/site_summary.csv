@@ -1,0 +1,7 @@
+call_site,call_site_hash,policy,in_table,buffers,bytes,scoped_bytes_pct,brief_bytes_pct,long_bytes_pct,escaped_unknown_bytes_pct,ambiguous_bytes_pct,censored_bytes_pct,no_request_bytes_pct,escaped_buffers,alive_after_end_p50_ms,alive_after_end_max_ms,site_truth,site_verdict
+process.js:processRoute,6032067261616903543,Bump,True,5752,24434829274,100.0,0.0,0.0,0.0,0.0,0.0,0.0,0,,,request-scoped,good
+batch.js:batchRoute,10594155676959940577,Bump,True,993888,16807849721,100.0,0.0,0.0,0.0,0.0,0.0,0.0,0,,,request-scoped,good
+fetch.js:fetchRoute,7791549285265555129,Slab,True,5746,6025117696,100.0,0.0,0.0,0.0,0.0,0.0,0.0,0,,,request-scoped,good
+aggregate.js:aggregateRoute,13608350406885744963,System,True,1138,2386558976,0.0,0.0,100.0,0.0,0.0,0.0,0.0,1138,6541.796500000011,15093.275999999954,escaping,neutral (correct)
+ingest.js:ingestRoute,7788200244258950291,Bump,True,2323,1313979255,100.0,0.0,0.0,0.0,0.0,0.0,0.0,0,,,request-scoped,good
+cache.js:cacheRoute,8985841585374529601,Bump,True,5791,23719936,100.0,0.0,0.0,0.0,0.0,0.0,0.0,0,,,request-scoped,good

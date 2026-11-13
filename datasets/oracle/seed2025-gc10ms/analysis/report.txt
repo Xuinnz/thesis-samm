@@ -1,0 +1,67 @@
+============================================================================================
+ Layer 1 vs reachability oracle -- seed2025-gc10ms
+ table: /home/red/samm-final/datasets/shadow-telemetry/intermediate/step7-ml-refinery/call_site_policy_assignment.csv
+ DELTA = 50 ms after request end, LONG = 1000 ms
+============================================================================================
+ 23,154 requests, 1,014,638 Buffers, 13,693 forced GCs over 541 s (requested every 10 ms); workload 0ab98bb5b39546bd
+ GC gap p50 22.2 ms, p99 27.6 ms, max 47.4 ms; GC duration p50 12.0 ms, max 30.6 ms
+
+ Per call-site (bytes-weighted truth):
+ call site                       policy   buffers       MB  scoped%  escaped%  ambig%  cens%   alive p50/max ms  verdict
+ process.js:processRoute           Bump     5,752 23,302.9   100.00      0.00    0.00   0.00                     good
+ batch.js:batchRoute               Bump   993,888 16,029.2   100.00      0.00    0.00   0.00                     good
+ fetch.js:fetchRoute               Slab     5,746  5,746.0   100.00      0.00    0.00   0.00                     good
+ aggregate.js:aggregateRoute     System     1,138  2,276.0     0.00    100.00    0.00   0.00       6,542/15,093  neutral (correct)
+ ingest.js:ingestRoute             Bump     2,323  1,253.1   100.00      0.00    0.00   0.00                     good
+ cache.js:cacheRoute               Bump     5,791     22.6   100.00      0.00    0.00   0.00                     good
+
+ Matrix (% of all tracked Buffers / bytes / byte-seconds):
+                            buffers     bytes    byte-s
+ good                        99.89%    95.32%    64.91%
+ bad                          0.00%     0.00%     0.00%
+ bad:brief                    0.00%     0.00%     0.00%
+ bad:long                     0.00%     0.00%     0.00%
+ bad:escaped_unknown          0.00%     0.00%     0.00%
+ neutral_missed               0.00%     0.00%     0.00%
+ neutral_correct              0.11%     4.68%    35.09%
+ excluded                     0.00%     0.00%     0.00%
+
+ Sensitivity (bytes-weighted %): every Nth forced GC kept, DELTA swept
+  GC every  DELTA    good     bad  missed  correct  excluded  (ambig)
+      22ms      0    0.00    0.00    0.00     4.68     95.32    95.32
+      22ms     10   93.52    0.00    0.00     4.68      1.80     1.80
+      22ms     25   95.25    0.00    0.00     4.68      0.07     0.07
+      22ms     50   95.32    0.00    0.00     4.68      0.00     0.00
+      22ms    100   95.32    0.00    0.00     4.68      0.00     0.00
+      22ms    250   95.32    0.00    0.00     4.68      0.00     0.00
+      22ms   1000   95.32    0.00    0.00     4.68      0.00     0.00
+      44ms      0    0.00    0.00    0.00     4.68     95.32    95.32
+      44ms     10   47.08    0.00    0.00     4.68     48.24    48.24
+      44ms     25   56.85    0.00    0.00     4.68     38.47    38.47
+      44ms     50   95.30    0.00    0.00     4.68      0.02     0.02
+      44ms    100   95.32    0.00    0.00     4.68      0.00     0.00
+      44ms    250   95.32    0.00    0.00     4.68      0.00     0.00
+      44ms   1000   95.32    0.00    0.00     4.68      0.00     0.00
+     111ms      0    0.00    0.00    0.00     4.68     95.32    95.32
+     111ms     10   19.13    0.00    0.00     4.68     76.19    76.19
+     111ms     25   23.29    0.00    0.00     4.68     72.03    72.03
+     111ms     50   45.71    0.00    0.00     4.68     49.61    49.61
+     111ms    100   91.03    0.00    0.00     4.68      4.29     4.29
+     111ms    250   95.32    0.00    0.00     4.68      0.00     0.00
+     111ms   1000   95.32    0.00    0.00     4.68      0.00     0.00
+     222ms      0    0.00    0.00    0.00     4.68     95.32    95.32
+     222ms     10    9.72    0.00    0.00     4.68     85.60    85.60
+     222ms     25   11.95    0.00    0.00     4.68     83.37    83.37
+     222ms     50   23.15    0.00    0.00     4.68     72.17    72.17
+     222ms    100   46.18    0.00    0.00     4.68     49.14    49.14
+     222ms    250   95.32    0.00    0.00     4.68      0.00     0.00
+     222ms   1000   95.32    0.00    0.00     4.68      0.00     0.00
+    1110ms      0    0.00    0.00    0.00     4.68     95.32    95.32
+    1110ms     10    1.98    0.00    0.00     4.68     93.34    93.34
+    1110ms     25    2.32    0.00    0.00     4.68     93.00    93.00
+    1110ms     50    4.56    0.00    0.00     4.68     90.76    90.76
+    1110ms    100    9.36    0.00    0.00     4.68     85.96    85.96
+    1110ms    250   21.75    0.00    0.00     4.68     73.57    73.57
+    1110ms   1000   85.46    0.00    0.00     4.68      9.86     9.86
+ excluded = ambiguous + censored + no request. A DELTA below the GC interval cannot place
+ a death on either side of request end, so those rows are mostly ambiguous by construction.

@@ -1,16 +1,16 @@
 {
-    "total_records": 10046390,
-    "censored_count": 345,
-    "censored_pct": 0.003434069352274797,
-    "retained_count": 10046045,
+    "total_records": 10048872,
+    "censored_count": 342,
+    "censored_pct": 0.003403367064482461,
+    "retained_count": 10048530,
     "censored_by_call_site": [
         {
             "call_site_hash": 7791549285265555129,
-            "censored_count": 240
+            "censored_count": 238
         },
         {
             "call_site_hash": 6032067261616903543,
-            "censored_count": 51
+            "censored_count": 50
         },
         {
             "call_site_hash": 7788200244258950291,

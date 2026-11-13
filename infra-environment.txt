@@ -1,0 +1,12 @@
+date: 2026-11-13T02:31:25Z
+machine type: projects/1018897487210/machineTypes/t2d-standard-4
+zone: projects/1018897487210/zones/asia-southeast1-b
+cpu:  AMD EPYC 7B13  x4, threads per core: 1
+kernel: 7.0.0-1017-gcp
+cgroup: cgroup2fs   (the study needs cgroup2fs)
+swap: 0 device(s)   (the study needs 0)
+THP enabled: always [madvise] never   defrag: always defer defer+madvise [madvise] never   (the design expects madvise)
+docker: 29.9.3   node: v22.23.5   k6: k6 v0.55.0 (commit/90bb9415d0, go1.23.3, linux/amd64)   zig: 0.15.2   python: Python 3.12.3
+images: samm-enabled:bench 1085d14d2fa7 samm-baseline:bench 488ac38dc55c 
+clock: System time     : 0.000004828 seconds slow of NTP time Leap status     : Normal 
+repository: d52c259727fbe0bf71805e7cb9f96f933023f066

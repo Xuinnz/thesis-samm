@@ -2,12 +2,12 @@
     "container_ceiling_bytes": 1073741824,
     "node_v8_baseline_bytes": 83886080,
     "floor_quantile": 0.9,
-    "system_high_watermark_bytes": 69206016,
-    "system_reservation_bytes": 79586918,
+    "system_high_watermark_bytes": 71303168,
+    "system_reservation_bytes": 81998643,
     "general_safety_margin_bytes": 33554432,
-    "pool_hard_limit_bytes": 876714394,
+    "pool_hard_limit_bytes": 874302669,
     "beta_utilization_fraction": 0.75,
-    "m_available_bytes": 657535795.5,
+    "m_available_bytes": 655727001.75,
     "slab_classes": [
         64,
         128,
@@ -27,27 +27,27 @@
     ],
     "strata_quotas": {
         "bump:6032067261616903543": {
-            "P_j_bytes": 425496889,
-            "Q_j_bytes": 350001252,
-            "F_j_bytes": 301125609,
+            "P_j_bytes": 417167333,
+            "Q_j_bytes": 345349984,
+            "F_j_bytes": 300652687,
             "max_alloc_bytes": 16777216
         },
         "bump:7788200244258950291": {
             "P_j_bytes": 24081903,
-            "Q_j_bytes": 19809066,
-            "F_j_bytes": 16740015,
+            "Q_j_bytes": 19936088,
+            "F_j_bytes": 16734265,
             "max_alloc_bytes": 1048561
         },
         "bump:8985841585374529601": {
-            "P_j_bytes": 20480,
-            "Q_j_bytes": 16846,
+            "P_j_bytes": 16384,
+            "Q_j_bytes": 13563,
             "F_j_bytes": 4096,
             "max_alloc_bytes": 4096
         },
         "bump:10594155676959940577": {
-            "P_j_bytes": 31000579,
-            "Q_j_bytes": 25500166,
-            "F_j_bytes": 8493201,
+            "P_j_bytes": 32056162,
+            "Q_j_bytes": 26537540,
+            "F_j_bytes": 8705051,
             "max_alloc_bytes": 32767
         },
         "slab:64": {
@@ -136,7 +136,7 @@
         },
         "slab:1048576": {
             "P_j_bytes": 318767104,
-            "Q_j_bytes": 262208463,
+            "Q_j_bytes": 263889824,
             "F_j_bytes": 261095424,
             "max_alloc_bytes": 0
         }

@@ -660,6 +660,43 @@ its probe; CPU per request rose 1.2 → 3.2 ms past 250 VUs, mostly user time).
 
 All of the above ran on the laptop (Ryzen 5 6600H, WSL2). It is pilot data now.
 
+**VM results so far** (`samm-bench`: t2d-standard-4, asia-southeast1-b, AMD
+EPYC 7B13, server on core 1, k6 on cores 2-3; started 2026-11-13).
+
+*Calibration, glibc and jemalloc (closed loop, `calibrate-20261113-033728`):*
+
+| | glibc | jemalloc |
+|---|---|---|
+| Capacity | 989.8 req/s | 880 req/s |
+| Saturated (>= 98 % CPU) from | 400 VUs | 300 VUs |
+| At ~485 req/s (k = 1.0's peak is 500) | 56 % CPU, p95 9.9 ms | 66 % CPU, p95 13.5 ms |
+| At 500 VUs | OOM-killed | survived at 925 MB |
+
+k = 1.0 peaks at 57 % of jemalloc's capacity (78 % on the laptop), so the
+profile was taken well below saturation.
+
+*Retrained table (k = 1.0, 10 min, seed 19870601; pipeline 16 min):* K = 2;
+batch, cache, ingest, process → Bump, fetch → Slab, aggregate → System. Median
+overhang 17 / 24 / 42 / 42 / 42 ms for the managed sites against 1,323 ms for
+aggregate. Ceiling 625.3 MB (β = 0.75 until Phase 6), floors 437.1 MB,
+fingerprint 0ab98bb5b39546bd (unchanged: it hashes the workload settings).
+Same decisions as the laptop's table.
+
+*Layer 1 oracle (5 min each, MAX_RPS 100, forced GC every ~22 ms):*
+
+| | seed 19870601 (training) | seed 2025 (held out) |
+|---|---|---|
+| Requests / Buffers | 23,155 / 1,007,794 | 23,154 / 1,014,638 |
+| Managed sites request-scoped (bytes) | 100 % each | 100 % each |
+| aggregate escaping (bytes) | 100 %, alive 6.6 s median, 16.3 s max | 100 %, 6.5 s median, 15.1 s max |
+| Good / bad / missed / correct (bytes) | 95.34 / 0 / 0 / 4.66 % | 95.32 / 0 / 0 / 4.68 % |
+| Ambiguous or excluded | 0 % | 0 % |
+
+All six decisions correct on both seeds, and the seeds agree on every site.
+Caveat for the write-up: one clearly escaping site and five clearly
+request-scoped ones is the case K = 2 is built for; this does not exercise the
+all-scoped or all-escaping limitation. Files: `datasets/oracle/seed*/`.
+
 ## Decisions already made (by the user)
 
 - The final study runs on a cloud VM (GCP Tau T2D). Laptop runs are pilot data
