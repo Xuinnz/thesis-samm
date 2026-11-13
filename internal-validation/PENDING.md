@@ -692,6 +692,17 @@ Same decisions as the laptop's table.
 | Good / bad / missed / correct (bytes) | 95.34 / 0 / 0 / 4.66 % | 95.32 / 0 / 0 / 4.68 % |
 | Ambiguous or excluded | 0 % | 0 % |
 
+*Calibration, SAMM with the VM table (`calibrate-20261113-053800`):* capacity
+**1,128 req/s** (jemalloc 880, glibc 989.8: +28 % and +14 %), saturated from
+400 VUs, OOM-killed at 500 VUs and flagged unsafe from 400 (922.9 MB). Memory
+at equal load is HIGHER than jemalloc's (594 vs 435 MB at 150 VUs, 808 vs 678
+at 300): expect peak RSS to favour jemalloc in the main study.
+
+*Stress point by the 2026-11-13 rule:* lowest k whose peak rate covers both
+capacities (880 and 1,128) → **k = 2.5** (1,250 req/s; k = 2.0's 1,000 is below
+SAMM's capacity). Pending the survival guard: jemalloc baseline, 3 pilot
+seeds (base 20261113, apart from the main study's), at least 2 must survive.
+
 All six decisions correct on both seeds, and the seeds agree on every site.
 Caveat for the write-up: one clearly escaping site and five clearly
 request-scoped ones is the case K = 2 is built for; this does not exercise the
