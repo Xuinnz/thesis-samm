@@ -58,10 +58,10 @@ it mostly reflects capacity.
 
 ## Phase 1: prepare on the laptop (before renting the VM)
 
-1. **PENDING A3 fixes:** done 2026-11-02 except the empty Oct 8 recordings
-   (your call). Two new ones from that batch: decide whether floors should be
-   reserved at init (A3 item 9), and the failing steady-state allocator test
-   (A3 item 10).
+1. **PENDING A3 fixes:** done, except the empty Oct 8 recordings (your call).
+   Floors stay charged on first use (reserving them changed nothing on the
+   replayed traces: A3 item 9, state it in the thesis). The steady-state test
+   now schedules its own collections (A3 item 10).
 2. **Layer 1:** done: K fixed at 2 (be17915), the reachability oracle with
    its matrix analysis (77fc827), and the misroute wording (2026-11-02). The
    natural-break rule moved to ISMM (PENDING B3).
@@ -88,23 +88,43 @@ it mostly reflects capacity.
 7. **Optional (ISMM):** `run.sh` configs for page-keeping jemalloc
    (`MALLOC_CONF=oversize_threshold:0,dirty_decay_ms:-1,muzzy_decay_ms:-1`),
    SAMM with `SAMM_RECLAIM_POLICY=dontneed`, and the Buffer pooling baseline.
-8. **Push `main`.**
+8. **Buffer modes** (`SAMM_BUFFER_MODE`, default `detach`): merged
+   2026-11-13; the default is chosen on the VM (Phase 5, step 4).
+9. **Fresh-clone rehearsal:** done 2026-11-13. A fresh clone ran the whole
+   chain with short durations: environment from `requirements.txt`, the test
+   suite, both images, the probe, `run_full_pipeline.sh`, the oracle, trace
+   extraction, a pinned two-condition replicate, `derive_beta.py`, and an
+   internal-validation calibration. It found and fixed: no requirements file;
+   a relative `RESULTS_DIR` losing k6's summary; the probe needing files that
+   only existed on the laptop (its trace is now in git as
+   `microbench/probe-trace`); and core pinning missing outside `_bench-lib.sh`.
+10. **VM scripts:** `infra/` (create / start / stop, provisioning, automatic
+   power-off). Not yet run against a real project.
+11. **Push `main`.**
 
 ## Phase 2: provision the VM (about a day)
 
-- `t2d-standard-4` (4 full cores, no SMT, 16 GB), **on-demand**; Ubuntu 24.04
-  LTS; 100 GB balanced persistent disk; a region that offers T2D.
-- Install: Docker CE, **k6 v0.55.0**, Node 22, Python 3 + venv (pandas, numpy,
-  scikit-learn, matplotlib), **Zig 0.15.2** (host: allocator tests and the
-  microbenchmark), chrony (check it is in sync).
-- Check and record: cgroup v2, swap off, THP `enabled` / `defrag`
-  (expect `madvise` / `madvise`), kernel, Docker version.
-- Clone the repo; build `samm-baseline:bench` and `samm-enabled:bench`;
-  record image IDs.
-- Core layout: core 0 for the OS; **core 1 for the server container**
-  (`--cpuset-cpus=1 --cpus=1.0 --memory=1024m --memory-swap=1024m`);
-  **cores 2-3 for k6** (`taskset -c 2,3`).
-- Data: the profiling trace is regenerated on the VM. The raw Azure data
+Scripts and commands: `infra/README.md`.
+
+1. **Create:** `infra/vm.sh create` on the laptop: `t2d-standard-4` (4 full
+   cores, no SMT, 16 GB), **on-demand**, Ubuntu 24.04 LTS, 100 GB balanced
+   disk. Do this early: a trial account may not be able to raise quotas, so
+   find out now whether T2D is available to it.
+2. **Provision:** `bash provision.sh <clone URL>` on the VM. It installs Docker
+   CE, **Node 22**, **k6 v0.55.0**, **Zig 0.15.2**, the Python environment
+   from `requirements.txt` and node-gyp's Node headers (the Zig addon build
+   reads them), clones the repo, builds `samm-baseline:bench` and
+   `samm-enabled:bench`, and writes `infra-environment.txt`.
+3. **Check the record:** cgroup v2, no swap, THP `enabled` / `defrag`
+   (`madvise` expected), one thread per core, chrony synchronised.
+4. **Test suite:** `cd zig-allocator && PATH="$PWD/../venv/bin:$PATH"
+   ./run_tests.sh` must pass all 8 steps.
+- **Core layout, for every script:** `export CPUSET_CPUS=1 K6_TASKSET=2,3`
+  (core 0 for the OS, core 1 for the server container, cores 2-3 for k6).
+  `_bench-lib.sh`, `run_replicates.sh`, `internal-validation/run.sh`,
+  `run_characterization.sh` and `run_oracle.sh` all read them; the probe and
+  the microbenchmark take `PROBE_CPU=1` / `CPU=1`.
+- **Data:** the profiling trace is regenerated on the VM. The raw Azure data
   (2.0 GB, not in git) is only needed for Phase 10b: upload or re-download it.
 
 ## Phase 3: health reference (half a day)
@@ -157,6 +177,11 @@ it mostly reflects capacity.
    If fewer than 2 survive, step down one level and repeat. **Lock the
    main-study k** and record it with the calibration numbers and the pilot
    outcomes.
+4. **Choose the buffer mode** at the locked k: `N=10 CONDITIONS=samm` with
+   `SAMM_BUFFER_MODE=detach`, then the same seeds with `chunk`. Compare CPU per
+   request, throughput, processing p99, fallback share and survival
+   (`docs/buffer-modes-report.md`). Fix the choice before Phase 6, because the
+   memory outside the pool, and so β, depends on it.
 
 ## Phase 6: derive β at the locked load point, then the final table (about a day)
 
@@ -226,18 +251,24 @@ counts and full-window throughput if any run was killed; the Layer 1 oracle matr
 
 ## Operations
 
-- **Long jobs:** `tmux` or `nohup`, logs to files. Scripts are resumable; a
-  dropped SSH session doesn't lose a campaign.
+- **Long jobs:** inside `tmux`, through `infra/then-poweroff.sh <log>
+  <command...>`: the job survives a dropped SSH session and the VM powers off
+  when it ends, so it stops costing money. Scripts are resumable. Use
+  `KEEP_ON=1` when another job follows.
 - **Health:** probe before every batch and daily. Note VM restarts and Google
   maintenance events; discard an interrupted run, never patch it.
-- **Backups:** copy results off the VM daily (`gsutil rsync` to a bucket, or
-  `scp` to the laptop); snapshot the disk before major phases.
+- **Backups:** copy results off the VM after each phase
+  (`infra/vm.sh fetch benchmark-results`); snapshot the disk before major
+  phases.
 - **Fixed within a campaign:** image IDs, table, settings, environment.
 - **Record per run:** machine type, zone, kernel, Docker, THP mode, image IDs,
   table hash (`run.json` already holds most of these).
-- **Cost:** stop the VM between phases (the disk persists). Total machine time
-  roughly 8-12 days including the extras; check current pricing (likely tens of
-  dollars; new-account credits probably cover it).
+- **Cost:** about $0.17 an hour on demand (check the console), so the main
+  study is about $7 and the whole plan (8-12 days of machine time) about
+  $35-50. A stopped VM costs only its disk. The trial credit's time limit, not
+  its amount, is the constraint. Set a budget alert.
+- **After every start:** run the probe. A stopped VM can come back on
+  different hardware.
 
 ## Rough calendar
 

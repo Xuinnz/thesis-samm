@@ -273,6 +273,20 @@ drift test.
    is OOM-killed about 3 minutes in on the laptop, which bears on the stress
    point and on killed runs. Full report: `docs/buffer-modes-report.md`.
 
+13. **Done 2026-11-13: fresh-clone rehearsal and VM scripts.** A fresh clone
+   ran the whole runbook chain with short durations on the laptop and found
+   four things a new machine would have tripped on, all fixed: no
+   `requirements.txt` (added, pinned); a relative `RESULTS_DIR` losing k6's
+   summary; the probe needing gitignored files (its trace is now in git,
+   `microbench/probe-trace`, and `reference` mode needs no reference); core
+   pinning only in `_bench-lib.sh` (now `CPUSET_CPUS` / `K6_TASKSET` in
+   internal validation, characterization and the oracle too). `infra/` holds
+   the VM scripts (create / start / stop, provisioning, power-off after a
+   job); they have not been run against a real project yet.
+   Floors (item 9): reserving them at startup gave identical fallbacks on both
+   mixed trace slices and slightly more for a single site, so they stay
+   charged on first use. State it in the thesis.
+
 ## A4. Model fixes before retraining on the VM
 
 **Decided 2026-10-17: fix both** (a) and (b). (a) is implemented on the laptop
