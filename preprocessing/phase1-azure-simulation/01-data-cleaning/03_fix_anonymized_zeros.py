@@ -12,8 +12,12 @@ import os
 import time
 
 
-INPUT_DIR = "../../../datasets/azure-trace-2019/intermediate/step2-burst-only"
-OUTPUT_DIR = "../../../datasets/azure-trace-2019/intermediate/step3-zero-fixed"
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import _batch
+
+INPUT_DIR = _batch.intermediate("step2-burst-only")
+OUTPUT_DIR = _batch.intermediate("step3-zero-fixed")
 
 def fix_anonymized_zeros():
     os.makedirs(OUTPUT_DIR, exist_ok=True)

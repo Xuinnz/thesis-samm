@@ -8,11 +8,16 @@
 import pandas as pd
 import numpy as np
 import glob
+import json
 import os
 import time
 
-INPUT_DIR="../../../datasets/azure-trace-2019/intermediate/step3-zero-fixed"
-OUTPUT_DIR="../../../datasets/azure-trace-2019/processed/traffic-models"
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import _batch
+
+INPUT_DIR = _batch.intermediate("step3-zero-fixed")
+OUTPUT_DIR = _batch.processed("traffic-models")
 
 def build_markov_chain():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -50,6 +55,21 @@ def build_markov_chain():
     p95 = np.percentile(composite_ts, 95)
 
     print(f"Computed Thresholds -> P25: {p25:.2f} | P75: {p75:.2f} | P95: {p95:.2f}")
+
+    # Classify on another batch's thresholds when asked (see _batch.py): on its
+    # own percentiles every batch is a quarter idle and a quarter busy.
+    thresholds_source = _batch.BATCH or "all days"
+    own = (float(p25), float(p75), float(p95))
+    if _batch.SCALE_FROM:
+        source = os.path.join(_batch.processed("traffic-models", _batch.SCALE_FROM), "traffic_thresholds.json")
+        if not os.path.exists(source):
+            raise SystemExit(f"AZURE_SCALE_FROM={_batch.SCALE_FROM}: {source} not found. Build that batch first.")
+        with open(source) as f:
+            borrowed = json.load(f)
+        p25, p75, p95 = borrowed["p25"], borrowed["p75"], borrowed["p95"]
+        thresholds_source = _batch.SCALE_FROM
+        print(f"Using thresholds from '{thresholds_source}' -> P25: {p25:.2f} | P75: {p75:.2f} | P95: {p95:.2f} "
+              f"(this batch's own: {own[0]:.2f} | {own[1]:.2f} | {own[2]:.2f})")
 
     # Look-ahead logic for Cooldown (Is the next 3-minute window declining?)
     # We calculate the 3-minute rolling mean and shift it backwards by 3 
@@ -97,7 +117,7 @@ def build_markov_chain():
 
     # Mask out day boundary transitions
     is_boundary = pd.Series(False, index=range(len(ts_series) - 1))
-    boundary_indices = [(i * 1440) - 1 for i in range(1, 14)]
+    boundary_indices = [(i * 1440) - 1 for i in range(1, len(files))]
     is_boundary.loc[boundary_indices] = True
     valid_mask = ~is_boundary.values
 
@@ -108,9 +128,34 @@ def build_markov_chain():
     # Ensure columns/rows are in a logical order
     state_order = ['Idle', 'Ramp', 'Burst', 'Cooldown']
     transition_matrix = transition_matrix.reindex(index=state_order, columns=state_order, fill_value=0.0)
+
+    # A state with no minutes has an all-zero row, and the load generator's walk
+    # starts in Idle and would never leave it. Possible only on borrowed
+    # thresholds (a week with no minute below another week's 25th percentile).
+    empty = [s for s in state_order if transition_matrix.loc[s].sum() == 0]
+    if empty:
+        raise SystemExit(f"No minute of this batch is in state(s) {empty} on the thresholds from "
+                         f"'{thresholds_source}'. The two batches are too far apart to share a scale.")
     
     matrix_out = os.path.join(OUTPUT_DIR, "markov_transition_matrix.csv")
     transition_matrix.to_csv(matrix_out)
+
+    # The thresholds and what they produced, for another batch to borrow and
+    # for batch_summary.py to compare batches.
+    with open(os.path.join(OUTPUT_DIR, "traffic_thresholds.json"), "w") as f:
+        json.dump({
+            "batch": _batch.BATCH or "all days",
+            "days": [_batch.day_of(p) for p in files],
+            "thresholds_from": thresholds_source,
+            "p25": float(p25), "p75": float(p75), "p95": float(p95),
+            "own_p25": own[0], "own_p75": own[1], "own_p95": own[2],
+            "peak_invocations_per_minute": float(ts_series.max()),
+            "mean_invocations_per_minute": float(ts_series.mean()),
+            "minutes": int(len(ts_series)),
+            "state_share": {s: float((states == s).mean()) for s in state_order},
+            "state_mean_invocations": {s: float(ts_series[states == s].mean()) if (states == s).any() else 0.0
+                                       for s in state_order},
+        }, f, indent=2)
 
     elapsed = time.time() - start_time
     print("\n" + "="*50)

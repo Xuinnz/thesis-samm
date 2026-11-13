@@ -67,9 +67,11 @@ services:
       LD_PRELOAD: "${CHARACTERIZATION_LD_PRELOAD-/usr/lib/x86_64-linux-gnu/libjemalloc.so.2}"
     volumes:
       - ../../datasets/shadow-telemetry/raw:/app/datasets/shadow-telemetry/raw
-    mem_limit: 1024M
-    memswap_limit: 1024M   # equal to mem_limit => zero swap headroom (true swap-off,
-                            # stronger guarantee than mem_swappiness alone)
+    # 1 GiB unless MEM_LIMIT says otherwise (the 2 GB / 4 GB retraining). The
+    # workload fingerprint reads this limit from inside the container.
+    mem_limit: "${MEM_LIMIT:-1024M}"
+    memswap_limit: "${MEMSWAP_LIMIT:-${MEM_LIMIT:-1024M}}"   # equal to mem_limit => zero swap headroom
+                            # (true swap-off, stronger guarantee than mem_swappiness alone)
     mem_swappiness: 0
     cpus: 1.0
     # Optional core pinning (the VM: server on core 1, k6 on cores 2-3 through

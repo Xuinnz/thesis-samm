@@ -8,8 +8,12 @@ import os
 import time
 import json
 
-INPUT_DIR = "../../../datasets/azure-trace-2019/raw"
-OUTPUT_DIR = "../../../datasets/azure-trace-2019/processed/traffic-models"
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import _batch
+
+INPUT_DIR = _batch.RAW_DIR
+OUTPUT_DIR = _batch.processed("traffic-models")
 
 # ---------------------------------------------------------------------------
 # Log-normal fitting via least-squares across 4 percentile anchors
@@ -73,7 +77,7 @@ def derive_gaussian_jitter():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     file_pattern = os.path.join(INPUT_DIR, "function_durations_percentiles.anon.d*.csv")
-    files = sorted(glob.glob(file_pattern))
+    files = _batch.select_days(sorted(glob.glob(file_pattern)))
 
     if not files:
         print(f"Error: No files found matching {file_pattern}")

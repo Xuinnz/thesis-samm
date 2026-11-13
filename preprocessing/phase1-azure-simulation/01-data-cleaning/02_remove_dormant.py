@@ -9,8 +9,12 @@ import glob
 import os
 import time
 
-INPUT_DIR = "../../../datasets/azure-trace-2019/intermediate/step1-http-only"
-OUTPUT_DIR = "../../../datasets/azure-trace-2019/intermediate/step2-burst-only"
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import _batch
+
+INPUT_DIR = _batch.intermediate("step1-http-only")
+OUTPUT_DIR = _batch.intermediate("step2-burst-only")
 
 def remove_dormant_functions():
     os.makedirs(OUTPUT_DIR, exist_ok=True)

@@ -99,6 +99,14 @@ Notes:
 
 ## A2. Additional results the panel asked for (added 2026-10-17)
 
+**Tooling ready 2026-11-13; the commands are in `docs/vm-test-plan.md`, Phase
+10.** `MEM_LIMIT` now reaches the profiling container, Layer 3 and the runs
+(with a check that the table matches the limit); `AZURE_DAYS` builds a Phase 1
+batch in its own folder and `TRAFFIC_BATCH` drives training or a run from it.
+Both weeks are built and committed. Measured on the first week's scale they are
+close (mean rate within 1 %, holds 3 % longer in week 2), so (b) is a mild
+drift test, not a surge-against-off-peak contrast.
+
 Extra results, not the main claim: run after (or alongside) A1's main study,
 with a smaller n per condition (decide how many).
 

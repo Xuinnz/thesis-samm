@@ -52,10 +52,20 @@ MAX_VUS="${MAX_VUS:-200}"
 # independent random ones.
 SCHEDULE_SEED="${SCHEDULE_SEED:-20250911}"
 
-MARKOV_MATRIX_PATH="${MARKOV_MATRIX_PATH:-../../datasets/azure-trace-2019/processed/traffic-models/markov_transition_matrix.csv}"
-TRAFFIC_SERIES_PATH="${TRAFFIC_SERIES_PATH:-../../datasets/azure-trace-2019/processed/traffic-models/traffic_state_series.csv}"
-JITTER_PARAMS_PATH="${JITTER_PARAMS_PATH:-../../datasets/azure-trace-2019/processed/traffic-models/jitter_parameters.json}"
-PAYLOAD_CSV_PATH="${PAYLOAD_CSV_PATH:-../../datasets/azure-trace-2019/processed/memory-models/memory_payload_allocations.csv}"
+# TRAFFIC_BATCH=d08-d14 drives k6 from that Phase 1 batch's traffic, hold-time
+# and payload models (preprocessing/phase1-azure-simulation/_batch.py) instead
+# of the default ones built from every published day. Empty = the default.
+TRAFFIC_BATCH="${TRAFFIC_BATCH:-}"
+AZURE_MODELS="../../datasets/azure-trace-2019/processed${TRAFFIC_BATCH:+/$TRAFFIC_BATCH}"
+if [ ! -f "$REPO_ROOT/datasets/azure-trace-2019/processed${TRAFFIC_BATCH:+/$TRAFFIC_BATCH}/traffic-models/markov_transition_matrix.csv" ]; then
+    echo "ERROR: no traffic models for TRAFFIC_BATCH='$TRAFFIC_BATCH' under datasets/azure-trace-2019/processed/." >&2
+    echo "       Build the batch first: AZURE_DAYS=... bash preprocessing/phase1-azure-simulation/run_phase1.sh" >&2
+    exit 1
+fi
+MARKOV_MATRIX_PATH="${MARKOV_MATRIX_PATH:-$AZURE_MODELS/traffic-models/markov_transition_matrix.csv}"
+TRAFFIC_SERIES_PATH="${TRAFFIC_SERIES_PATH:-$AZURE_MODELS/traffic-models/traffic_state_series.csv}"
+JITTER_PARAMS_PATH="${JITTER_PARAMS_PATH:-$AZURE_MODELS/traffic-models/jitter_parameters.json}"
+PAYLOAD_CSV_PATH="${PAYLOAD_CSV_PATH:-$AZURE_MODELS/memory-models/memory_payload_allocations.csv}"
 
 HEALTH_CHECK_TIMEOUT_S="${HEALTH_CHECK_TIMEOUT_S:-60}"
 POST_K6_SETTLE_S="${POST_K6_SETTLE_S:-5}"
@@ -270,7 +280,7 @@ run_condition() {
     throttled_before=$(echo "$cpu_before" | awk '/^throttled_usec/{print $2}'); : "${throttled_before:=0}"
     nr_throttled_before=$(echo "$cpu_before" | awk '/^nr_throttled/{print $2}'); : "${nr_throttled_before:=0}"
 
-    log "Running k6: ${SIMULATION_MINUTES}m, RPS ${MIN_RPS}-${MAX_RPS}, VUs ${PRE_ALLOCATED_VUS}-${MAX_VUS}, seed ${SCHEDULE_SEED}"
+    log "Running k6: ${SIMULATION_MINUTES}m, RPS ${MIN_RPS}-${MAX_RPS}, VUs ${PRE_ALLOCATED_VUS}-${MAX_VUS}, seed ${SCHEDULE_SEED}${TRAFFIC_BATCH:+, traffic batch $TRAFFIC_BATCH}"
     local window_start
     window_start=$(date +%s)
     (
@@ -377,7 +387,7 @@ run_condition() {
     BENCH_SEED="$SCHEDULE_SEED" BENCH_IMAGE_ID="$image_id" BENCH_STARTED_AT="$started_at" \
     BENCH_TABLE_SHA256="$(sha256sum "$REPO_ROOT/zig-allocator/src/routing-table/model_weights.zig" | cut -d' ' -f1)" \
     BENCH_ORDER="${RUN_ORDER:-}" BENCH_ORDER_POSITION="${RUN_ORDER_POSITION:-}" \
-    BENCH_CPUSET="$CPUSET_CPUS" BENCH_K6_TASKSET="$K6_TASKSET" \
+    BENCH_CPUSET="$CPUSET_CPUS" BENCH_K6_TASKSET="$K6_TASKSET" BENCH_TRAFFIC_BATCH="$TRAFFIC_BATCH" \
     BENCH_END_STATUS="$end_status" BENCH_END_OOM="$end_oom" BENCH_END_EXIT="$end_exit" BENCH_DIED_AFTER="$died_after" \
     "$PYTHON_BIN" - "$summary_json" "$result_json" "$BENCH_LABEL" "$peak_bytes" "$oom_kills" \
         "$mem_limit_bytes" "$cpu_usage_usec" "$cpu_throttled_usec" "$cpu_nr_throttled" \
@@ -488,6 +498,8 @@ result = {
     },
     "died_after_s": int(os.environ["BENCH_DIED_AFTER"]) if os.environ.get("BENCH_DIED_AFTER", "").lstrip("-").isdigit() else None,
     "k6_taskset": os.environ.get("BENCH_K6_TASKSET") or None,
+    # Which Phase 1 batch drove k6; "all days" is the default models.
+    "traffic_batch": os.environ.get("BENCH_TRAFFIC_BATCH") or "all days",
 }
 if result["requests"]:
     result["page_faults_per_request"] = round(int(page_faults) / result["requests"], 1)

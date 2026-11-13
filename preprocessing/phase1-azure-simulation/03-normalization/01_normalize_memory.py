@@ -5,8 +5,12 @@ import os
 import time
 import json
 
-INPUT_PATH = "../../../datasets/azure-trace-2019/intermediate/step4-memory-profile/memory_percentiles_representative.csv"
-OUTPUT_DIR = "../../../datasets/azure-trace-2019/processed/memory-models"
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import _batch
+
+INPUT_PATH = os.path.join(_batch.intermediate("step4-memory-profile"), "memory_percentiles_representative.csv")
+OUTPUT_DIR = _batch.processed("memory-models")
 
 # Target container heap ceiling in megabytes (1 GB = 1024 MB)
 CONTAINER_HEAP_CEILING_MB = 1024.0
@@ -67,8 +71,20 @@ def normalize_memory_profiles():
         print("Error: P99 percentile column not found.")
         return
 
-    p99_anchor_val = df[PCT_COLS_MAP['p99']].quantile(0.99)
+    p99_anchor_val = float(df[PCT_COLS_MAP['p99']].quantile(0.99))
     print(f"Global P99 Normalization Anchor established at: {p99_anchor_val:.2f} MB")
+
+    # Divide by another batch's anchor when asked (see _batch.py): on its own
+    # anchor every batch's heaviest apps map to the same payload size.
+    own_anchor, anchor_source = p99_anchor_val, _batch.BATCH or "all days"
+    if _batch.SCALE_FROM:
+        source = os.path.join(_batch.processed("memory-models", _batch.SCALE_FROM), "normalization_metadata.json")
+        if not os.path.exists(source):
+            raise SystemExit(f"AZURE_SCALE_FROM={_batch.SCALE_FROM}: {source} not found. Build that batch first.")
+        with open(source) as f:
+            p99_anchor_val = float(json.load(f)["global_p99_azure_anchor_mb"])
+        anchor_source = _batch.SCALE_FROM
+        print(f"Using the anchor from '{anchor_source}': {p99_anchor_val:.2f} MB (this batch's own: {own_anchor:.2f} MB)")
 
     # Safety guard against division by zero
     if p99_anchor_val <= 0:
@@ -128,6 +144,8 @@ def normalize_memory_profiles():
             "v8_and_node_reserved_mb": V8_AND_NODE_RESERVED_MB,
             "effective_ceiling_mb": EFFECTIVE_CEILING_MB,
             "global_p99_azure_anchor_mb": p99_anchor_val,
+            "anchor_from": anchor_source,
+            "own_p99_azure_anchor_mb": own_anchor,
             "apps_processed": len(scaled_df),
             "sample_count_carried": sample_count_carried,
         }, f, indent=4)

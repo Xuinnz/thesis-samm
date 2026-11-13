@@ -25,6 +25,7 @@ datasets/oracle/*/gcs.csv
 # Preprocessing byproduct. k6 and the server read only its summary,
 # jitter_parameters.json.
 datasets/azure-trace-2019/processed/traffic-models/jitter_per_function.csv
+datasets/azure-trace-2019/processed/*/traffic-models/jitter_per_function.csv
 
 *.log
 

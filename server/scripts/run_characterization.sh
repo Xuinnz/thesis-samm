@@ -74,10 +74,20 @@ export SHADOW_PROFILER_CAPACITY="${SHADOW_PROFILER_CAPACITY:-150000}"
 SCHEDULE_SEED="${SCHEDULE_SEED-19870601}"
 
 # Data paths fed to the k6 scenario's __ENV overrides.
-MARKOV_MATRIX_PATH="${MARKOV_MATRIX_PATH:-../../datasets/azure-trace-2019/processed/traffic-models/markov_transition_matrix.csv}"
-TRAFFIC_SERIES_PATH="${TRAFFIC_SERIES_PATH:-../../datasets/azure-trace-2019/processed/traffic-models/traffic_state_series.csv}"
-JITTER_PARAMS_PATH="${JITTER_PARAMS_PATH:-../../datasets/azure-trace-2019/processed/traffic-models/jitter_parameters.json}"
-PAYLOAD_CSV_PATH="${PAYLOAD_CSV_PATH:-../../datasets/azure-trace-2019/processed/memory-models/memory_payload_allocations.csv}"
+# TRAFFIC_BATCH=d08-d14 drives k6 from that Phase 1 batch's traffic, hold-time
+# and payload models (preprocessing/phase1-azure-simulation/_batch.py) instead
+# of the default ones built from every published day. Empty = the default.
+TRAFFIC_BATCH="${TRAFFIC_BATCH:-}"
+AZURE_MODELS="../../datasets/azure-trace-2019/processed${TRAFFIC_BATCH:+/$TRAFFIC_BATCH}"
+if [ ! -f "$REPO_ROOT/datasets/azure-trace-2019/processed${TRAFFIC_BATCH:+/$TRAFFIC_BATCH}/traffic-models/markov_transition_matrix.csv" ]; then
+    echo "ERROR: no traffic models for TRAFFIC_BATCH='$TRAFFIC_BATCH' under datasets/azure-trace-2019/processed/." >&2
+    echo "       Build the batch first: AZURE_DAYS=... bash preprocessing/phase1-azure-simulation/run_phase1.sh" >&2
+    exit 1
+fi
+MARKOV_MATRIX_PATH="${MARKOV_MATRIX_PATH:-$AZURE_MODELS/traffic-models/markov_transition_matrix.csv}"
+TRAFFIC_SERIES_PATH="${TRAFFIC_SERIES_PATH:-$AZURE_MODELS/traffic-models/traffic_state_series.csv}"
+JITTER_PARAMS_PATH="${JITTER_PARAMS_PATH:-$AZURE_MODELS/traffic-models/jitter_parameters.json}"
+PAYLOAD_CSV_PATH="${PAYLOAD_CSV_PATH:-$AZURE_MODELS/memory-models/memory_payload_allocations.csv}"
 
 HEALTH_CHECK_TIMEOUT_S="${HEALTH_CHECK_TIMEOUT_S:-30}"
 POST_K6_SETTLE_S="${POST_K6_SETTLE_S:-5}"  # brief pause before shutdown, lets any final GC cycle land
@@ -184,6 +194,7 @@ fi
 # ---------------------------------------------------------------------
 # 5. Run k6
 # ---------------------------------------------------------------------
+log "Traffic models: ${TRAFFIC_BATCH:-all days (default)}"
 log "Step 5/7: Running k6 (${SIMULATION_MINUTES} minutes, LOAD_K=${LOAD_K}: MAX_RPS=${MAX_RPS}, HOLD_SCALE=${HOLD_SCALE}, PROCESS_HOLD_MS=${PROCESS_HOLD_MS}, VUs ${PRE_ALLOCATED_VUS}/${MAX_VUS}, seed ${SCHEDULE_SEED:-random})..."
 (
     cd "$K6_SCENARIO_DIR"

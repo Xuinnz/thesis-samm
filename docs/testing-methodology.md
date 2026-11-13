@@ -325,9 +325,13 @@ proportional to the limit.
 
 **S-2: Traffic drift.** Traffic models are built separately from days 1–7 and
 days 8–14 of the Azure trace. The table is trained on the first week and
-evaluated on both, contrasting in-distribution and shifted traffic. Each
-week's traffic character (share of burst and idle states, peak rates) is
-reported.
+evaluated on both, contrasting in-distribution and shifted traffic. The second
+week is measured on the first week's scale (its traffic-state thresholds and
+its memory anchor), because on its own percentiles every week is a quarter idle
+and a quarter busy by construction. Memory percentiles are published for days
+1–12 only, so the second week's payload model uses days 8–12. Each week's
+traffic character (share of burst and idle states, request rates, hold times)
+is reported.
 
 ---
 

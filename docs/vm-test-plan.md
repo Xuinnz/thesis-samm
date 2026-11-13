@@ -263,15 +263,115 @@ All allocators (glibc, jemalloc, SAMM; plus the variants if ready), final table:
 3. A small **GC-instrumented pass** (clean pass for metrics, instrumented pass
    for GC only, as in gc-control).
 
-## Phase 10: the panel's extra results (2-3 days; smaller n, e.g. 15-20 replicates)
+## Phase 10: the panel's extra results (about 27 h of machine time at n = 15)
 
-- **(a) 2 GB and 4 GB limits:** retrain the table for each limit (Layer 3
-  depends on it; β re-derived the same way), run at the same load. Optionally
-  also with holds ×2 / ×4 to keep memory pressure equal.
-- **(b) Azure d01-d07 vs d08-d14:** Phase 1 preprocessing needs a day-range
-  option and per-batch output folders. Train on d01-d07, test on both weeks.
-  Memory files cover only d01-d12: payload model d01-d07 vs d08-d12, or one
-  shared model.
+Run after the main study. Every variant retrains the table, so **each one gets
+a branch of its own** (`git switch -c extras/...`) and the frozen main table on
+`main` is never overwritten; `git switch main` brings it back. All variants use
+the same 15 seeds (`SCHEDULE_SEED=20261300`), apart from the main study's, so
+they can be compared with each other. Results land in a folder named after the
+variant (`replicates-k2.0-mem2048m`, `replicates-k2.0-d08-d14`), and every
+result file records its `mem_limit_mb` and `traffic_batch`. Tooling written and
+tested on the laptop 2026-11-13 (2 GB and 4 GB tables compile and pass the
+allocator's tests; one short 2 GB run on week-2 traffic).
+
+**(a) 2 GB and 4 GB limits** (about 7 h each). Same load as the main study, so
+memory stops being the constraint and the comparison shifts to CPU per request,
+latency and how much memory each side holds. For each limit (2048m, then 4096m):
+
+```bash
+git switch -c extras/mem-2048m
+# Profile in a container of this size, retrain, compile, run the allocator's tests (~16 min).
+MEM_LIMIT=2048m SKIP_BENCHMARK=1 server/scripts/run_full_pipeline.sh
+# β at this limit, exactly as in Phase 6: measure, recompile, confirm.
+MEM_LIMIT=2048m K=2.0 N=1 CONDITIONS=samm POLL_SAMM_STATS=1 RESULTS_DIR=benchmark-results/beta-mem2048m-pass1 server/scripts/run_replicates.sh
+server/scripts/derive_beta.py benchmark-results/beta-mem2048m-pass1/r01-samm-samm-stats.jsonl
+SAMM_BETA_UTILIZATION=<β> bash ml-refinery/run_ml_refinery.sh
+MEM_LIMIT=2048m K=2.0 N=1 CONDITIONS=samm POLL_SAMM_STATS=1 RESULTS_DIR=benchmark-results/beta-mem2048m-pass2 server/scripts/run_replicates.sh
+git commit -am "data(vm): routing table for a 2 GB container"
+# The runs (6 h): detached, and the VM powers off when they finish.
+nohup infra/then-poweroff.sh results/extras-mem2048m.log env MEM_LIMIT=2048m SCHEDULE_SEED=20261300 K=2.0 N=15 CONDITIONS="jemalloc samm" server/scripts/run_replicates.sh &
+git switch main        # only after the runs have finished
+```
+
+- The quota step takes the container size from the trace's own record
+  (`workload_manifest.json`), so a recompile on this branch is sized for 2 GB
+  without being told again, and it refuses a size that disagrees with the trace.
+- `run_replicates.sh` refuses to run SAMM when `MEM_LIMIT` is not the limit the
+  table was trained for. Without that check a 1 GiB table would run in a 2 GB
+  container unnoticed, because at k ≠ 1.0 the server's own check is switched off.
+- State in the write-up: the pool's floors do not grow with the limit (they come
+  from demand), only its ceiling does; and V8 sizes its own heap limit from the
+  container, for both conditions alike.
+- Optional second pass: holds ×2 / ×4 to keep memory pressure proportional.
+
+**(b) Azure days 1-7 against days 8-14** (about 13 h). The table is trained on
+the first week's traffic and tested on both weeks. The two batches are already
+built and committed under `datasets/azure-trace-2019/processed/{d01-d07,d08-d14}`
+(the VM has no raw trace and needs none):
+
+```bash
+git switch -c extras/week1
+TRAFFIC_BATCH=d01-d07 SKIP_BENCHMARK=1 server/scripts/run_full_pipeline.sh
+# β as in Phase 6, with TRAFFIC_BATCH=d01-d07 on each run_replicates.sh line, then commit.
+nohup infra/then-poweroff.sh results/extras-weeks.log bash -c '
+  TRAFFIC_BATCH=d01-d07 SCHEDULE_SEED=20261300 K=2.0 N=15 CONDITIONS="jemalloc samm" server/scripts/run_replicates.sh &&
+  TRAFFIC_BATCH=d08-d14 SCHEDULE_SEED=20261300 K=2.0 N=15 CONDITIONS="jemalloc samm" server/scripts/run_replicates.sh' &
+```
+
+How the batches are built (`preprocessing/phase1-azure-simulation/_batch.py`):
+`AZURE_DAYS=1-7 bash run_phase1.sh`, then
+`AZURE_DAYS=8-14 AZURE_SCALE_FROM=d01-d07 bash run_phase1.sh`. With no setting
+the scripts read every day and write where they always have, so the main
+study's models are unchanged. `AZURE_SCALE_FROM` measures the second week on
+the first week's scale (its traffic-state thresholds and its memory anchor): on
+its own percentiles every batch is a quarter idle and a quarter busy by
+construction, and no surge or quiet week could show. The memory files end at
+day 12, so the second week's payload model is days 8-12.
+
+What the two weeks look like (`batch_summary.py d01-d07 d08-d14`, at the main
+study's 1,000 req/s peak):
+
+| | d01-d07 | d08-d14 |
+| :--- | ---: | ---: |
+| days | d01, d02, d03, d04, d05, d06, d07 | d08, d09, d10, d11, d12, d13, d14 |
+| states classified on | d01-d07 | d01-d07 |
+| minutes | 10,080 | 10,080 |
+| mean invocations / min | 133,490 | 134,202 |
+| peak invocations / min | 209,993 | 768,890 |
+| share of minutes: Idle | 25.0 % | 20.9 % |
+| share of minutes: Ramp | 50.0 % | 59.0 % |
+| share of minutes: Burst | 10.1 % | 7.1 % |
+| share of minutes: Cooldown | 14.9 % | 13.0 % |
+| long-run share of the walk: Idle | 25.2 % | 21.1 % |
+| long-run share of the walk: Ramp | 50.0 % | 59.1 % |
+| long-run share of the walk: Burst | 10.0 % | 7.1 % |
+| long-run share of the walk: Cooldown | 14.7 % | 12.8 % |
+| mean stay in Idle | 5.6 min | 4.8 min |
+| mean stay in Ramp | 6.2 min | 7.2 min |
+| mean stay in Burst | 2.0 min | 2.0 min |
+| mean stay in Cooldown | 1.9 min | 2.0 min |
+| request rate in Idle | 748 req/s | 749 req/s |
+| request rate in Ramp | 854 req/s | 845 req/s |
+| request rate in Burst | 980 req/s | 1,000 req/s |
+| request rate in Cooldown | 1,000 req/s | 999 req/s |
+| mean request rate over the walk | 861 req/s | 856 req/s |
+| hold time, median | 445 ms | 459 ms |
+| hold time, 99th percentile | 2249 ms | 2355 ms |
+| memory files (apps) | 21,409 | 21,421 |
+| memory anchor (Azure, P99 app) | 670.7 MB | 670.7 MB (from d01-d07; own 706.2) |
+| payload model, invocation-weighted median | 188.0 MB | 186.7 MB |
+|   as allocated (largest = 16 MB) | 3.65 MB | 3.63 MB |
+
+**The two weeks are close.** On the first week's scale the second has fewer
+idle minutes (20.9 % against 25.0 %) and fewer busy ones (20.1 % against
+25.0 %), a mean request rate within 1 % (856 against 861 req/s), holds 3 %
+longer and payloads within 1 %. So this is a mild drift test, and "no
+difference between the weeks" is the likely and honest result. It is not a
+surge-against-off-peak contrast: summed over all HTTP functions the trace's
+quietest state still runs at 75 % of its busiest, and the load generator maps
+each batch's busiest state to `MAX_RPS`, so a batch's absolute level never
+reaches the server. Surge against off-peak is what the load levels (k) show.
 
 ## Phase 11: statistics and reporting
 

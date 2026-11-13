@@ -57,7 +57,10 @@ export SHADOW_PROFILER_CAPACITY="${SHADOW_PROFILER_CAPACITY:-150000}"
 
 # Container environment for the benchmark stage: 1GB, swap off, 1 vCPU.
 export MEM_LIMIT="${MEM_LIMIT:-1024m}"
-export MEMSWAP_LIMIT="${MEMSWAP_LIMIT:-1024m}"
+export MEMSWAP_LIMIT="${MEMSWAP_LIMIT:-$MEM_LIMIT}"
+# The same limit, in bytes, for Layer 3: the quotas are sized from the container
+# the trace was profiled in (the characterization container takes MEM_LIMIT too).
+export SAMM_CONTAINER_BYTES="${SAMM_CONTAINER_BYTES:-$(numfmt --from=iec "${MEM_LIMIT^^}")}"
 export CPUS="${CPUS:-1.0}"
 
 export SAMM_RECLAIM_POLICY="${SAMM_RECLAIM_POLICY:-none}"

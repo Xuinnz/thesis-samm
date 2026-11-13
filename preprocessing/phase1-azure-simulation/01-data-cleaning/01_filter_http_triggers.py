@@ -11,15 +11,20 @@ import os
 import time
 
 
-RAW_DIR = "../../../datasets/azure-trace-2019/raw"
-PROCESSED_DIR ="../../../datasets/azure-trace-2019/intermediate/step1-http-only"
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import _batch
+
+RAW_DIR = _batch.RAW_DIR
+PROCESSED_DIR = _batch.intermediate("step1-http-only")
 
 
 def filter_http_triggers():
     os.makedirs(PROCESSED_DIR, exist_ok=True)
 
     file_pattern = os.path.join(RAW_DIR, "invocations_per_function_md.anon.d*.csv")
-    files = sorted(glob.glob(file_pattern))
+    files = _batch.select_days(sorted(glob.glob(file_pattern)))
+    print(f"Phase 1 batch: {_batch.describe()} ({len(files)} day files)")
 
     if not files:
         print(f"Error: No Files found matching {file_pattern}")

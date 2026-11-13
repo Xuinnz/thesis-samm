@@ -34,8 +34,28 @@ OUTPUT_DIR = "../../datasets/shadow-telemetry/intermediate/step7-ml-refinery"
 # 600-850MB containers: the pool believed it owned 495.7MB of a 600MB box and
 # every run failed within seconds while the workload fingerprint still reported
 # "verified". The fingerprint now carries the container size for this reason.
-CONTAINER_HEAP_CEILING_BYTES = int(os.environ.get(
-    "SAMM_CONTAINER_BYTES", 1024 * 1024 * 1024))
+# The trace's own record of the container it was profiled in
+# (run_characterization.sh saves it): the default, so a recompile on a 2 GB
+# trace is sized for 2 GB without having to be told again.
+_MANIFEST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
+                         "datasets", "shadow-telemetry", "raw", "workload_manifest.json")
+_profiled = ""
+if os.path.exists(_MANIFEST):
+    with open(_MANIFEST) as _f:
+        _profiled = str(json.load(_f).get("parameters", {}).get("container_limit_bytes", ""))
+_profiled_bytes = int(_profiled) if _profiled.isdigit() else None
+
+CONTAINER_HEAP_CEILING_BYTES = int(os.environ.get("SAMM_CONTAINER_BYTES") or _profiled_bytes or 1024 * 1024 * 1024)
+
+# Sizing the quotas for one container and profiling in another gives a table
+# whose quotas and fingerprint name different limits, so it is refused unless
+# asked for on purpose (SAMM_ALLOW_CONTAINER_MISMATCH=1).
+if (_profiled_bytes and _profiled_bytes != CONTAINER_HEAP_CEILING_BYTES
+        and os.environ.get("SAMM_ALLOW_CONTAINER_MISMATCH") != "1"):
+    raise SystemExit(
+        f"The trace was profiled in a {_profiled_bytes / 2**20:.0f} MiB container, but SAMM_CONTAINER_BYTES asks for "
+        f"quotas sized for {CONTAINER_HEAP_CEILING_BYTES / 2**20:.0f} MiB. Profile at the limit you are training for "
+        f"(MEM_LIMIT=... server/scripts/run_full_pipeline.sh sets both), or unset SAMM_CONTAINER_BYTES.")
 
 # Base memory required by the V8 runtime engine
 # TODO: Flagging because it's hardcoded. currently no backup that supports this

@@ -8,17 +8,23 @@ import glob
 import os
 import time
 
-INPUT_DIR = "../../../datasets/azure-trace-2019/raw"
-OUTPUT_DIR = "../../../datasets/azure-trace-2019/intermediate/step4-memory-profile"
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import _batch
+
+INPUT_DIR = _batch.RAW_DIR
+OUTPUT_DIR = _batch.intermediate("step4-memory-profile")
 
 def handle_missing_days():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     file_pattern = os.path.join(INPUT_DIR, "app_memory_percentiles.anon.d*.csv")
-    files = sorted(glob.glob(file_pattern))
+    # The memory files exist for d01-d12 only, so a batch that reaches past
+    # day 12 uses whichever of its days were published (d08-d14 -> d08-d12).
+    files = _batch.select_days(sorted(glob.glob(file_pattern)))
 
     if not files:
-        print(f"Files not found {file_pattern}")
+        print(f"Files not found {file_pattern} for {_batch.describe()}")
         return
     
     print("Starting Step 1.4: Missing Day Handling")

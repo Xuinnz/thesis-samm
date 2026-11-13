@@ -71,7 +71,26 @@ esac
 
 export SIMULATION_MINUTES="${SIMULATION_MINUTES:-10}"
 export MIN_RPS=5 PRE_ALLOCATED_VUS=400 MAX_VUS=1400
-export MEM_LIMIT=1024m MEMSWAP_LIMIT=1024m CPUS=1.0
+# 1 GiB unless told otherwise (the panel's 2 GB / 4 GB runs: MEM_LIMIT=2048m).
+# Swap is always off: memory-swap equals memory.
+export MEM_LIMIT="${MEM_LIMIT:-1024m}" CPUS=1.0
+export MEMSWAP_LIMIT="$MEM_LIMIT"
+MEM_LIMIT_BYTES=$(numfmt --from=iec "${MEM_LIMIT^^}") || { echo "ERROR: MEM_LIMIT='$MEM_LIMIT' is not a size like 1024m or 2g"; exit 1; }
+
+# SAMM's table is sized for one container limit. At k != 1.0 the server is told
+# to accept a workload mismatch (below), which also silences its check of the
+# limit, so check it here: a 1 GiB table in a 2 GiB container would run, and
+# measure a pool half the size it should be.
+TABLE_FINGERPRINT="$REPO_ROOT/zig-allocator/workload_fingerprint.json"
+if [[ " ${CONDS[*]} " == *" samm "* ]] && [ "${SUMMARY_ONLY:-0}" != "1" ] && [ -f "$TABLE_FINGERPRINT" ]; then
+  TABLE_LIMIT_BYTES=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['parameters'].get('container_limit_bytes',''))" "$TABLE_FINGERPRINT")
+  if [ -n "$TABLE_LIMIT_BYTES" ] && [ "$TABLE_LIMIT_BYTES" != "$MEM_LIMIT_BYTES" ]; then
+    echo "ERROR: the routing table was trained for a $((TABLE_LIMIT_BYTES / 1048576)) MiB container, and MEM_LIMIT=$MEM_LIMIT is $((MEM_LIMIT_BYTES / 1048576)) MiB."
+    echo "       Retrain for this limit first (MEM_LIMIT=$MEM_LIMIT SKIP_BENCHMARK=1 server/scripts/run_full_pipeline.sh),"
+    echo "       on a branch of its own so the main study's table stays as it is. See docs/vm-test-plan.md, Phase 10."
+    exit 1
+  fi
+fi
 export SHADOW_PROFILER_ENABLED=false SAMM_TELEMETRY=false
 export PROCESS_MAX_BYTES=$((16*1024*1024))
 export SAMM_RECLAIM_POLICY=none SAMM_WARMUP=false
@@ -102,7 +121,12 @@ VARY_SEED="${VARY_SEED:-1}"
 SAMM_EXTRA=()
 [ "$K" != "1.0" ] && SAMM_EXTRA=(-e SAMM_ALLOW_WORKLOAD_MISMATCH=true)
 
-export RESULTS_DIR="${RESULTS_DIR:-$REPO_ROOT/benchmark-results/replicates-k$K}"
+# A non-default limit or traffic batch gets a folder of its own, so its results
+# are never mixed with (or skipped as "already done" by) the main configuration.
+VARIANT=""
+[ "$MEM_LIMIT" != "1024m" ] && VARIANT="$VARIANT-mem$MEM_LIMIT"
+[ -n "${TRAFFIC_BATCH:-}" ] && VARIANT="$VARIANT-$TRAFFIC_BATCH"
+export RESULTS_DIR="${RESULTS_DIR:-$REPO_ROOT/benchmark-results/replicates-k$K$VARIANT}"
 mkdir -p "$RESULTS_DIR"
 
 # shellcheck source=./_bench-lib.sh
@@ -115,6 +139,7 @@ if [ "${SUMMARY_ONLY:-0}" != "1" ]; then
   echo " Replicates: n=$N at k=$K, conditions: ${CONDS[*]} ($([ "$ROTATE" = "1" ] && echo 'order rotated each replicate' || echo 'fixed order'))"
   echo " Per run  : ${SIMULATION_MINUTES}m, MAX_RPS=$MAX_RPS, process hold ${PROCESS_HOLD_MS}ms, fetch hold x${HOLD_SCALE}"
   echo " Container: ${MEM_LIMIT}, swap off, ${CPUS} vCPU"
+  echo " Traffic  : ${TRAFFIC_BATCH:-all published days (default models)}"
   echo " Seed     : $BASE_SEED $([ "$VARY_SEED" = "1" ] && echo '+ replicate index (paired: same seed for all conditions in a replicate)' || echo '(fixed across all replicates)')"
   echo " Results  : $RESULTS_DIR"
   echo " Pinning  : server ${CPUSET_CPUS:-not pinned}, k6 ${K6_TASKSET:-not pinned}"
