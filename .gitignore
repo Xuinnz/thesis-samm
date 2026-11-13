@@ -96,3 +96,5 @@ frontend/styles/output.css
 benchmark-results/
 recordings/
 results/
+# Files copied back from the benchmark VM (infra/vm.sh fetch).
+vm-results/
