@@ -160,7 +160,9 @@ def load(cond):
         # A run whose container vanished has zeroed CPU/fault counters; its
         # memory and drop figures survive via the poller but its performance
         # numbers describe a dying process and must not enter a mean.
-        r["_died"] = (r["cpu_utilisation_pct"] == 0.0) or r["oom_kills"] > 0 or r["failed_rate"] > 0.05
+        ended = (r.get("container_end_state") or {}).get("status")
+        r["_died"] = ((r["cpu_utilisation_pct"] == 0.0) or r["oom_kills"] > 0 or r["failed_rate"] > 0.05
+                      or ended not in (None, "running", "unknown"))
         r["_suspect"] = r.get("timing_suspect", False)
         out.append(r)
     return out
@@ -196,6 +198,12 @@ if not any_rows:
 print("-" * 96)
 print("  Mean ±95% CI, over runs that survived and were not timing-suspect.")
 print("  'survived' counts runs with no OOM, live counters at teardown, and <5% failed requests.")
+deaths = [(c, os.path.basename(p)[:3], r) for c, _ in CONDS for p in sorted(glob.glob(os.path.join(results_dir, f"r*-{c}.json")))
+          for r in [json.load(open(p))] if (r.get("container_end_state") or {}).get("status") not in (None, "running", "unknown")]
+for cond, rep_id, r in deaths:
+    e = r["container_end_state"]
+    print(f"  {rep_id} {cond}: container {e['status']} (OOM-killed: {e['oom_killed']}, exit {e['exit_code']}) "
+          f"{r.get('died_after_s')} s after k6 was launched (start-up included); peak {r['peak_rss_mb']} MB")
 
 # Pairwise memory comparison only where both conditions have healthy runs.
 def healthy(cond):

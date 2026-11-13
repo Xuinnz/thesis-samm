@@ -327,6 +327,19 @@ run_condition() {
         mem_limit_bytes=$(( $(echo "$MEM_LIMIT" | tr -dc '0-9') * 1024 * 1024 ))
     fi
 
+    # Why the container ended, from Docker itself. The cgroup's oom_kill counter
+    # vanishes with the container, so the poller's last sample (up to 5 s old)
+    # reads 0 for a container that was OOM-killed; Docker keeps the verdict.
+    local end_status end_oom end_exit end_finished died_after=""
+    read -r end_status end_oom end_exit end_finished < <(
+        docker inspect -f '{{.State.Status}} {{.State.OOMKilled}} {{.State.ExitCode}} {{.State.FinishedAt}}' "$container" 2>/dev/null \
+            || echo "unknown false -1 -")
+    if [ "$end_status" != "running" ] && [ "$end_status" != "unknown" ]; then
+        died_after=$(( $(date -d "$end_finished" +%s 2>/dev/null || echo "$window_start") - window_start ))
+        [ "$end_oom" = "true" ] && [ "${oom_kills:-0}" -eq 0 ] && oom_kills=1
+        log "Container ended before teardown: status=$end_status oom_killed=$end_oom exit=$end_exit, ${died_after}s after k6 was launched (its start-up included)"
+    fi
+
     local flt_after
     flt_after=$(cg_read memory.stat "$container" pgfault)
     local page_faults=$((flt_after - flt_before))
@@ -365,6 +378,7 @@ run_condition() {
     BENCH_TABLE_SHA256="$(sha256sum "$REPO_ROOT/zig-allocator/src/routing-table/model_weights.zig" | cut -d' ' -f1)" \
     BENCH_ORDER="${RUN_ORDER:-}" BENCH_ORDER_POSITION="${RUN_ORDER_POSITION:-}" \
     BENCH_CPUSET="$CPUSET_CPUS" BENCH_K6_TASKSET="$K6_TASKSET" \
+    BENCH_END_STATUS="$end_status" BENCH_END_OOM="$end_oom" BENCH_END_EXIT="$end_exit" BENCH_DIED_AFTER="$died_after" \
     "$PYTHON_BIN" - "$summary_json" "$result_json" "$BENCH_LABEL" "$peak_bytes" "$oom_kills" \
         "$mem_limit_bytes" "$cpu_usage_usec" "$cpu_throttled_usec" "$cpu_nr_throttled" \
         "$window_secs" "$MAX_RPS" "$CPUS" "$SIMULATION_MINUTES" "$page_faults" <<'PYEOF'
@@ -465,6 +479,14 @@ result = {
     "run_order": os.environ.get("BENCH_ORDER") or None,
     "order_position": int(os.environ["BENCH_ORDER_POSITION"]) if os.environ.get("BENCH_ORDER_POSITION", "").isdigit() else None,
     "cpuset_cpus": os.environ.get("BENCH_CPUSET") or None,
+    # Docker's record of how the container ended. "running" means it was alive
+    # at teardown; anything else means it died during the run.
+    "container_end_state": {
+        "status": os.environ.get("BENCH_END_STATUS") or None,
+        "oom_killed": os.environ.get("BENCH_END_OOM") == "true",
+        "exit_code": int(os.environ["BENCH_END_EXIT"]) if os.environ.get("BENCH_END_EXIT", "").lstrip("-").isdigit() else None,
+    },
+    "died_after_s": int(os.environ["BENCH_DIED_AFTER"]) if os.environ.get("BENCH_DIED_AFTER", "").lstrip("-").isdigit() else None,
     "k6_taskset": os.environ.get("BENCH_K6_TASKSET") or None,
 }
 if result["requests"]:
