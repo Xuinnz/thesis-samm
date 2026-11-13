@@ -196,14 +196,23 @@ K6S=$K6S K6_LIMIT=$K6_LIMIT MODE=$MODE CLOCK_OK=$CLOCK_OK CLOCK_LINE="$CLOCK_LIN
 import json, os, statistics as st, sys
 ref_dir, p, probe_ref = sys.argv[1], sys.argv[2], sys.argv[3]
 load = lambda f: [json.loads(l) for l in open(f) if l.strip().startswith('{')]
-if probe_ref:
-    # a previous `reference` run of this script
-    ref = load(f'{probe_ref}/native.jsonl') + load(f'{probe_ref}/v8.jsonl')
-    ref_name = 'reference'
-else:
-    ref = load(f'{ref_dir}/engine-jemalloc.jsonl') + load(f'{ref_dir}/malloc-jemalloc.jsonl') + load(f'{ref_dir}/v8-jemalloc.jsonl')
-    ref_name = 'Sep 19'
 now = load(f'{p}/native.jsonl') + load(f'{p}/v8.jsonl')
+ref, ref_name = None, ''
+if os.environ['MODE'] != 'reference':   # recording a reference needs none
+    try:
+        if probe_ref:
+            # a previous `reference` run of this script
+            ref = load(f'{probe_ref}/native.jsonl') + load(f'{probe_ref}/v8.jsonl')
+            ref_name = 'reference'
+        else:
+            # the laptop's own reference, which exists only on the laptop
+            ref = load(f'{ref_dir}/engine-jemalloc.jsonl') + load(f'{ref_dir}/malloc-jemalloc.jsonl') + load(f'{ref_dir}/v8-jemalloc.jsonl')
+            ref_name = 'Sep 19'
+    except OSError as e:
+        print(f"no reference to compare against ({e.filename} is missing).")
+        print("Record one first: host-probe.sh <dir> reference, then set PROBE_REFERENCE=<dir>.")
+        print('HOST NOT CLEAN')
+        sys.exit(1)
 def cell(rows, layer, touch, f=lambda r: r['ns_per_alloc']):
     return st.median(f(r) for r in rows if r['layer'] == layer and r['trace'] == 'mix' and bool(r['touch']) == touch)
 per_gc = lambda r: r['gc_ms'] / r['gc_count']
