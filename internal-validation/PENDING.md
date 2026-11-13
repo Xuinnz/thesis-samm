@@ -370,6 +370,13 @@ POOL_HARD_LIMIT that subtracts it), only β's value.
 
 ## A5. Statistics, after the n = 100 runs
 
+**Script done 2026-11-13, before any main-study data:**
+`stats-eval/hypothesis-testing/main_study_stats.py` implements the approved
+method and the killed-run rule, and writes Chapter 4's three tables
+(`stats/tables.md`). Tested on generated studies with known answers
+(`test_main_study_stats.py`, 32 checks). The user reversed the earlier
+"after the runs" decision so the analysis is fixed before the data exists.
+
 `stats-eval/` holds only `.gitkeep` (user's decision: after the runs). The
 README promises Shapiro-Wilk and Levene, then a t-test or Mann-Whitney U, with
 Bonferroni-adjusted alpha = 0.017 across the three metrics, plus the

@@ -275,7 +275,9 @@ All allocators (glibc, jemalloc, SAMM; plus the variants if ready), final table:
 
 ## Phase 11: statistics and reporting
 
-`stats-eval`, as the approved methodology states: Shapiro-Wilk and Levene, then
+`venv/bin/python stats-eval/hypothesis-testing/main_study_stats.py
+benchmark-results/main-study` (written and tested 2026-11-13, before any
+main-study data). As the approved methodology states: Shapiro-Wilk and Levene, then
 an independent-samples t-test or Mann-Whitney U; Bonferroni across the three
 metrics (α = 0.017); the relative percentage difference per metric; survival
 counts and full-window throughput if any run was killed; the Layer 1 oracle matrix
