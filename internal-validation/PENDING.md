@@ -5,7 +5,7 @@
 - **Part A — Finishing the thesis course (priority).** The n = 100 main study
   on a GCP Tau T2D VM, the extra results the panel asked for, then statistics.
 - **Part B — ISMM 2027 plan.** The research extension. Starts with two cheap
-  experiments; go/no-go around mid-December 2026. Never let it delay Part A.
+  experiments; no dated go/no-go (2026-11-13); branch `ismm`. Never let it delay Part A.
 - **Shared** (end of file): results so far, decisions, probe history, things
   to remember.
 
@@ -413,21 +413,53 @@ the comparisons (alpha ≈ 0.008).
 - **ISMM 2027.** Call not published yet; ISMM 2026's deadline was 2026-03-27
   (co-located with PLDI), so expect **late March 2027**. ISMM 2026 also took
   intellectual abstracts and practitioner reports: check the 2027 call.
-- **Go/no-go: mid-December 2026,** after B1.
+- **No dated go/no-go** (the user's decision, 2026-11-13). The ISMM work
+  goes ahead on its own branch (`ismm`); B1's results shape what the paper
+  claims, they do not gate it.
 - Fallbacks: a shorter ISMM 2027 format if offered; MPLR or the VMIL workshop
   (SPLASH); an ACM Student Research Competition; ISMM 2028 for the full paper.
 - Framing to aim for: profile-guided, request-scoped region allocation for
   off-heap memory in a garbage-collected runtime, **with safe runtime
   adaptation**, beating simple pooling on real Buffer-heavy applications.
 
-## B1. Decisive experiments first (by mid-December)
+## B-now. Decisions and the Nov 13-16 sprint (2026-11-13)
+
+- **Branch `ismm`**, off `main`: the upgraded allocator and the paper's
+  experiments. The VM and `main` stay on the thesis. Keep the branch additive
+  (new conditions, new files) so `main` merges in cleanly.
+- **Demotion before rebalancing** (agreed). **First real workload: file upload
+  + zlib** (agreed).
+- **Sprint rule:** by Nov 16, the design and code that need judgment are done
+  and tested for correctness on the laptop, and every experiment is a
+  one-command script; the measurements run later on the VM.
+- **Order:** (1) page-keeping jemalloc as a condition; the upload + zlib service
+  with a count of where its Buffer bytes come from (app code, Node's own JS,
+  Node's C++), since that decides whether SAMM can reach them; (2) pooling
+  baseline; automatic call-site identification; (3) escape signal and demotion;
+  (4) use-after-reclaim counter, drift injection, experiment scripts, handoff
+  document.
+- **Escape signal to build (replaces B2.1's "sampled finalizer probe"):**
+  reachability, not timing. Sample 1 in N Buffers with a WeakRef; at the first
+  natural major GC after the request ended (plus a short grace period), a
+  sampled Buffer that is still alive has escaped. GC lag cannot inflate it, it
+  works the same for System-routed Buffers (so a demoted site can be
+  re-promoted, and an unprofiled site can start in System and be promoted on
+  evidence, which answers the K = 2 limitation), and the forced-GC oracle
+  (A4(a)) is its ground truth.
+- **What the VM results changed:** lead with "profile-guided", not "ML" (the
+  sites separate trivially: 17-42 ms against 1,323 ms overhang); chunk mode's
+  detach-at-region-close is a temporal-safety mechanism worth presenting in its
+  own right; drift must be injected (the Azure weeks are too alike, A2).
+
+## B1. The first experiments (their results shape the claim)
 
 1. **App-level Buffer pooling baseline:** a server config that reuses Buffers
    per call site (a free list). A few days. If it gets close to SAMM, the
    contribution shrinks: rethink before investing more.
 2. **One real Buffer-heavy workload, labelled by hand:** does the advantage
    hold outside our own server? 2-3 weeks.
-Go = SAMM clearly beats pooling AND the real workload shows a gain.
+What to look for: does SAMM clearly beat pooling, and does the real workload
+show a gain?
 
 ## B2. Dynamic SAMM: runtime adaptation (user's priority)
 
@@ -603,11 +635,13 @@ reasons) to confirm the major-GC split.
 
 ## B8. Rough timeline (to a late-March deadline)
 
+(Written 2026-10-17 and now behind: the thesis reached the VM's Phase 5 on
+2026-11-13. Kept for the order of work; the dates are not commitments.)
+
 | Window | Work |
 |---|---|
 | Oct 20 - Nov 16 | A1 VM setup and probe (shared); A3 fixes; B1.1 pooling baseline |
 | Nov 17 - Dec 14 | A1 calibration and retraining; B1.2 one real workload; B2 design |
-| **Dec 15** | **Go/no-go** |
 | Dec 15 - Jan 31 | A1 main study runs; B2 demotion + rebalancing; two more workloads |
 | Feb | B3 predictor evaluation; B5 ablations; remaining runs |
 | Mar 1 - deadline | Writing (B7) |

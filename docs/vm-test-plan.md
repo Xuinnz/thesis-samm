@@ -414,5 +414,6 @@ counts and full-window throughput if any run was killed; the Layer 1 oracle matr
 | 2 | Phase 4 (characterization); Phase 5 (stress point); Phase 6 (β, final table); Phase 7 (microbenchmark); start Phase 8; ISMM pooling baseline if ready |
 | 3-4 | Finish Phase 8; Phase 9 (n = 100); Phase 10 (extras); Phase 11 (statistics) |
 
-The ISMM go/no-go (mid-December) can share the VM in week 2: its two decisive
-experiments are the pooling baseline and one real Buffer-heavy workload.
+The ISMM work (branch `ismm`, no dated go/no-go) can share the VM once the
+thesis runs are done: its first experiments are the pooling baseline and one
+real Buffer-heavy workload.
