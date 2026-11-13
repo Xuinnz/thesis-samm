@@ -292,6 +292,39 @@ results folder has a `run-settings.txt` (image, table hash, buffer mode, core).
 The image must be newer than the table: run after a SAMM benchmark on the
 frozen table.
 
+**Result (2026-11-13), `zig-allocator/microbench/results-vm-2026-11-13/` on the
+VM (copy in the laptop's `vm-results/`).** Host probe clean before and after,
+all seven layers completed, frozen table and image, chunk mode, core 1. Median
+ns per allocation over 5 trials:
+
+| | mix | batch | cache | ingest | fetch | process |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| **No memory touched** | | | | | | |
+| SAMM engine, no bridge | 15.9 | 12.2 | 77.4 | 83.3 | 86.4 | 83.5 |
+| SAMM through Node-API (the server's path) | 2,054 | 283 | 1,530 | 1,524 | 2,800 | 13,399 |
+| V8 `allocUnsafe` on jemalloc | 6,849 | 2,725 | 820 | 8,053 | 46,581 | 194,258 |
+| V8 `allocUnsafe` on glibc | 6,604 | 2,451 | 823 | 7,861 | 46,556 | 202,642 |
+| **One write per 4 KiB page** | | | | | | |
+| SAMM engine, no bridge | 188 | 30.5 | 78.3 | 1,113 | 2,373 | 13,459 |
+| SAMM through Node-API | 2,633 | 402 | 3,924 | 6,410 | 9,269 | 30,181 |
+| V8 `allocUnsafe` on jemalloc | 11,468 | 4,205 | 2,568 | 21,438 | 81,627 | 716,360 |
+| V8 `allocUnsafe` on glibc | 7,578 | 2,623 | 1,989 | 14,988 | 60,934 | 298,159 |
+
+- On the mix as served, SAMM takes 2,054 ns against 6,849 on jemalloc (3.3
+  times less) with no memory touched, and 2,633 against 11,468 (4.4 times) with
+  page writes. Most of both is collector time: 1,419 of SAMM's 2,054 ns (1,312
+  collections) and 4,977 of V8's 6,849 (3,766 collections).
+- **SAMM is slower on cache**, the one 4 KiB site: 1,530 against 820 ns, and
+  3,924 against 2,568 with page writes (that cell varies: SD 984 and 801).
+- The engine itself costs 12-86 ns; the rest of SAMM's time is the bridge, the
+  Buffer object and the collector (batch: 283 ns in all, 12 of it the engine).
+- **Do not quote the aggregate column yet.** Aggregate is routed to System, so
+  it is not a SAMM allocation in any row. With page writes it came out ten
+  times apart between the 5-trial run and the 30-trial cell for every layer,
+  plain jemalloc with no V8 included (33,932 against 3,331 ns). That is the
+  host's page handling for 2 MiB blocks (huge pages are the first suspect), not
+  an allocator difference; look at it before the column is used.
+
 ## Phase 8: internal validation (2-3 days)
 
 All allocators (glibc, jemalloc, SAMM; plus the variants if ready), final table:
