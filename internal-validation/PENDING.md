@@ -727,7 +727,10 @@ profile was taken well below saturation.
 *Retrained table (k = 1.0, 10 min, seed 19870601; pipeline 16 min):* K = 2;
 batch, cache, ingest, process → Bump, fetch → Slab, aggregate → System. Median
 overhang 17 / 24 / 42 / 42 / 42 ms for the managed sites against 1,323 ms for
-aggregate. Ceiling 625.3 MB (β = 0.75 until Phase 6), floors 437.1 MB,
+aggregate. **Final table, frozen 2026-11-13: β = 0.843, ceiling 702.9 MiB,
+floors 491.2 MiB, sha256 b2318961…997c, buffer mode `chunk`** (runbook Phases
+5-6 have the numbers; all three confirming seeds survived, the heaviest at
+94.8 % of the limit). Before that: ceiling 625.3 MB (β = 0.75), floors 437.1 MB,
 fingerprint 0ab98bb5b39546bd (unchanged: it hashes the workload settings).
 Same decisions as the laptop's table.
 

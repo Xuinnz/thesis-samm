@@ -23,14 +23,14 @@ pub const thp_min_arena_bytes: usize = 67108864;
 pub const thp_max_rss_distortion_pct: f64 = 3.125;
 
 /// Hard ceiling on bytes committed across every stratum at once.
-pub const m_available_bytes: usize = 655727001;
+pub const m_available_bytes: usize = 737037149;
 /// Sum of the floors. Informational: floors are charged against the
 /// ceiling on first use, like elastic growth, not reserved at startup.
-pub const reserved_floor_bytes: usize = 458326016;
+pub const reserved_floor_bytes: usize = 515100672;
 /// Total VIRTUAL extent of the mapping. Deliberately larger than the
 /// ceiling: untouched pages cost nothing, and the real limit is the
 /// committed-bytes counter, not the geometry.
-pub const region_bytes: usize = 2630619136;
+pub const region_bytes: usize = 2956042240;
 pub const elastic_factor: usize = 4;
 pub const bump_growth_chunk: usize = 2097152;
 
@@ -86,29 +86,29 @@ pub const SlabClass = struct {
 
 /// One dedicated arena per Bump-classified call-site.
 pub const bump_arenas = [_]BumpArena{
-    .{ .call_site_hash = 10594155676959940577, .offset = 0, .floor_bytes = 6803456, .span_bytes = 106151936, .segment_bytes = 847872, .floor_segments = 8, .max_segments = 125, .use_huge_pages = true },
-    .{ .call_site_hash = 6032067261616903543, .offset = 106151936, .floor_bytes = 235020288, .span_bytes = 1381400576, .segment_bytes = 29376512, .floor_segments = 8, .max_segments = 47, .use_huge_pages = true },
-    .{ .call_site_hash = 7788200244258950291, .offset = 1487552512, .floor_bytes = 13078528, .span_bytes = 79745024, .segment_bytes = 1634304, .floor_segments = 8, .max_segments = 48, .use_huge_pages = true },
-    .{ .call_site_hash = 8985841585374529601, .offset = 1567297536, .floor_bytes = 0, .span_bytes = 57344, .segment_bytes = 4096, .floor_segments = 1, .max_segments = 14, .use_huge_pages = false },
+    .{ .call_site_hash = 10594155676959940577, .offset = 0, .floor_bytes = 7647232, .span_bytes = 119316480, .segment_bytes = 954368, .floor_segments = 8, .max_segments = 125, .use_huge_pages = true },
+    .{ .call_site_hash = 6032067261616903543, .offset = 119316480, .floor_bytes = 264163328, .span_bytes = 1552695296, .segment_bytes = 33017856, .floor_segments = 8, .max_segments = 47, .use_huge_pages = true },
+    .{ .call_site_hash = 7788200244258950291, .offset = 1672011776, .floor_bytes = 14700544, .span_bytes = 89632768, .segment_bytes = 1835008, .floor_segments = 8, .max_segments = 48, .use_huge_pages = true },
+    .{ .call_site_hash = 8985841585374529601, .offset = 1761644544, .floor_bytes = 0, .span_bytes = 61440, .segment_bytes = 4096, .floor_segments = 1, .max_segments = 15, .use_huge_pages = false },
 };
 
 /// Ascending by class_size, exactly as spatial_quotas.json listed them.
 pub const slab_classes = [_]SlabClass{
-    .{ .class_size = 64, .offset = 2630025216, .floor_slots = 0, .max_slots = 64, .use_huge_pages = false },
-    .{ .class_size = 128, .offset = 2622230528, .floor_slots = 0, .max_slots = 32, .use_huge_pages = false },
-    .{ .class_size = 256, .offset = 2623430656, .floor_slots = 0, .max_slots = 16, .use_huge_pages = false },
-    .{ .class_size = 512, .offset = 2625826816, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
-    .{ .class_size = 1024, .offset = 1567354880, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
-    .{ .class_size = 2048, .offset = 2623414272, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
-    .{ .class_size = 4096, .offset = 2625794048, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
-    .{ .class_size = 8192, .offset = 2630553600, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
-    .{ .class_size = 16384, .offset = 2623283200, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
-    .{ .class_size = 32768, .offset = 2625531904, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
-    .{ .class_size = 65536, .offset = 2630029312, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
-    .{ .class_size = 131072, .offset = 2622234624, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
-    .{ .class_size = 262144, .offset = 2623434752, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
-    .{ .class_size = 524288, .offset = 2625830912, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
-    .{ .class_size = 1048576, .offset = 1567363072, .floor_slots = 194, .max_slots = 1006, .use_huge_pages = true },
+    .{ .class_size = 64, .offset = 2955448320, .floor_slots = 0, .max_slots = 64, .use_huge_pages = false },
+    .{ .class_size = 128, .offset = 2947653632, .floor_slots = 0, .max_slots = 32, .use_huge_pages = false },
+    .{ .class_size = 256, .offset = 2948853760, .floor_slots = 0, .max_slots = 16, .use_huge_pages = false },
+    .{ .class_size = 512, .offset = 2951249920, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
+    .{ .class_size = 1024, .offset = 1761705984, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
+    .{ .class_size = 2048, .offset = 2948837376, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
+    .{ .class_size = 4096, .offset = 2951217152, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
+    .{ .class_size = 8192, .offset = 2955976704, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
+    .{ .class_size = 16384, .offset = 2948706304, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
+    .{ .class_size = 32768, .offset = 2950955008, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
+    .{ .class_size = 65536, .offset = 2955452416, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
+    .{ .class_size = 131072, .offset = 2947657728, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
+    .{ .class_size = 262144, .offset = 2948857856, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
+    .{ .class_size = 524288, .offset = 2951254016, .floor_slots = 0, .max_slots = 8, .use_huge_pages = false },
+    .{ .class_size = 1048576, .offset = 1761714176, .floor_slots = 218, .max_slots = 1131, .use_huge_pages = true },
 };
 
 /// Open-addressed, linear-probed lookup table, power-of-two capacity.

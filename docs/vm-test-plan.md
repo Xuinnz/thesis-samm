@@ -216,6 +216,16 @@ change after a benchmark result is seen.
    share and survival, with the per-seed differences
    (`docs/buffer-modes-report.md`). About 5 hours. Fix the choice before
    Phase 6, because the memory outside the pool, and so β, depends on it.
+   **Result (2026-11-13): `chunk`.** The rule, set before the numbers were
+   read: chunk if it clearly uses less CPU per request or serves more in most
+   seed pairs, and is no worse on survival, fallback share and peak memory.
+   Ten seeds (20261201-10), both modes 10 of 10 survived. Chunk against
+   detach: CPU per request 0.984 against 1.015 ms (lower in 9 of 10 pairs),
+   processing p99 26.1 against 30.7 ms (9 of 10), peak memory 841.3 against
+   856.6 MiB (9 of 10), fallback share 0.26 against 0.34 % (higher in 6 of 10:
+   no difference), throughput the same (768.1 req/s: at this load SAMM serves
+   everything offered). The VM's `~/.bashrc` exports `SAMM_BUFFER_MODE=chunk`;
+   a run's `-allocator.json` shows it as `sharedBuffers` above zero.
 
 ## Phase 6: derive β at the locked load point, then the final table (about a day)
 
@@ -231,6 +241,42 @@ change after a benchmark result is seen.
 3. **Freeze the table** for everything after this (record the
    `model_weights.zig` hash, fingerprint and image ID). At k ≠ 1.0 SAMM needs
    `SAMM_ALLOW_WORKLOAD_MISMATCH=true` (as in the demo).
+
+**Result (2026-11-13): β = 0.843, table frozen.** All runs k = 2.0, chunk
+mode, seeds 20261401-03 (apart from the main study's), host probe clean.
+
+| | Pass 1 (β = 0.75) | Pass 2 (β = 0.843) | | |
+| :--- | ---: | ---: | ---: | ---: |
+| Seed | 20261401 | 20261401 | 20261402 | 20261403 |
+| Survived | yes | yes | yes | yes |
+| Memory outside the pool, peak of the 1 s samples | 288.9 MiB | 219.1 | 229.2 | 138.3 |
+| Kernel's peak for the container | 938.6 MiB | 946.5 | 971.3 | 857.4 |
+| Share of the 1 GiB limit | 91.7 % | 92.4 % | 94.8 % | 83.7 % |
+| Capacity fallbacks | 37,394 | 14,662 | 24,285 | 575 |
+| Processing p99 | 48.6 ms | 40.6 | 42.2 | 20.9 |
+| Throughput | 895.6 req/s | 896.2 | 899.6 | 757.9 |
+| β this run gives | **0.843** | 0.927 | 0.915 | 1.024 |
+
+- Pass 1: C = 1,024 − 288.9 − 32 = 703.1 MiB, over a pool hard limit of
+  833.8 MiB, so β = 0.843. Recompiled: ceiling 737,037,149 bytes (702.9 MiB),
+  floors 491.2 MiB, 211.7 MiB shared.
+- Pass 2 is the method's "repeat the run once", done on three seeds instead of
+  one. All three survived, and none gives a β below 0.843, so 0.843 stands. The
+  higher values are **not** applied: the method does not iterate a second time,
+  and they are optimistic. The 1 s samples miss short spikes that the kernel's
+  peak counter records: by that counter, memory outside the pool peaked at
+  244, 269 and 155 MiB, 17-40 MiB above the sampled peaks. On the heaviest of
+  the three seeds the container came within 52.7 MiB of its limit.
+- **Frozen:** `model_weights.zig` sha256
+  `b2318961ebee4cde36f018db4874de2ee50b938bd5d729d14bbc5f46d8cb997c`, workload
+  fingerprint `0ab98bb5b39546bd`, image
+  `sha256:83d271ff0c6103e5446b429935571ead594f17f32469dc1b638c3c91f02fb34e`.
+- Two things this shows about the main study. Seeds differ a great deal in how
+  heavy they are (896-900 req/s on two of these, 758 on the third, 751-794 on
+  the ten buffer-mode seeds), and SAMM's peak memory follows: with the larger
+  pool it sits at 84-95 % of the limit, above the baseline pilot's mean. And a
+  seed heavier than any of these three could take SAMM past the limit; such a
+  run counts against SAMM's survival, as the rule fixed on 2026-11-13 says.
 
 ## Phase 7: microbenchmark (half a day)
 
