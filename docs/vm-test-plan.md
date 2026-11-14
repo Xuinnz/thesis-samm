@@ -412,6 +412,33 @@ OOM-killed within about 4 seconds (SAMM: 20 MiB to 929 MiB). That is a harness
 artefact, not an allocator result. Re-run with a warm-up ramp
 (160, 320, 640 req/s, then the 80 % and 95 % steps): `latency-own-warm-20261114`.
 
+*Latency at each allocator's own 80 % and 95 %, warmed* (host probe clean):
+
+| | glibc | jemalloc | SAMM |
+| :--- | ---: | ---: | ---: |
+| 80 % of own capacity | 874 req/s | 702 req/s | 930 req/s |
+| p95 / p99 there | 275.5 / 432.5 ms | 59.3 / 103.9 ms | 336.6 / 538.2 ms |
+| Survived the 80 % step | yes | yes | no: OOM-killed late in it (7,202 of 46,500 failed) |
+| 95 % of own capacity | 1,037: OOM-killed | 833: OOM-killed | 1,105: not reached |
+
+- **No allocator can run open-loop at 95 % of its own closed-loop capacity
+  inside 1 GiB**, and at 80 % all three are queueing (p95 6-59 times their
+  160 req/s value). An open loop keeps sending while requests wait, the
+  waiting requests hold their Buffers, and memory, not CPU, is what gives out.
+- **By relative load, SAMM does worst**: at 80 % of its capacity it is the one
+  killed, and its p95 is the highest. Its extra capacity cannot be used under
+  an open loop near the limit; memory is SAMM's binding constraint, as the β
+  passes already showed. By absolute rate it does best (the shared sweep: at
+  830 req/s SAMM 22.1 ms p95, glibc 41.2, jemalloc killed). Report both views;
+  they answer different questions.
+- The warm-up steps repeat the shared sweep within about 10 % (p95 at 640
+  req/s: SAMM 15.3 against 14.7, jemalloc 38.5 against 35.1, glibc 20.1
+  against 18.8), so the latency measurements are reproducible.
+
+**Phase 8 done 2026-11-14**, apart from the optional item 6. Results on the VM
+under `internal-validation/results/`, copies in the laptop's
+`vm-results/phase8/` (without the raw sample files).
+
 ## Phase 9: external validation, the main study (about 2 days of machine time)
 
 1. **Pilot:** 2-3 runs at the locked k, to confirm stability.
