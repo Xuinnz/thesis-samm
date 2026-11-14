@@ -73,6 +73,9 @@ LOAD_K="${LOAD_K:-2.5}"
 SEED="${SEED:-20250911}"
 HOST_PORT="${HOST_PORT:-3000}"
 RESULTS_DIR="${RESULTS_DIR:-$HERE/results/$EXPERIMENT-$(date +%Y%m%d-%H%M%S)}"
+# Absolute, always: k6 runs from the scenario directory, so a relative path made
+# it fail at once ("could not create the 'csv' output").
+RESULTS_DIR="$(realpath -m "$RESULTS_DIR")"
 JEMALLOC_SO=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
 # Same values server/scripts/run_allocator_attribution.sh uses for its tuned glibc.
 GLIBC_MMAP_THRESHOLD="${GLIBC_MMAP_THRESHOLD:-131072}"
