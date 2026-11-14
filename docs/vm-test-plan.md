@@ -366,6 +366,52 @@ each at 80 % and 95 % of its own capacity (glibc 874, 1,037; jemalloc 702, 833;
 SAMM 930, 1,105). About 18 minutes per config for the seven-rate sweep, 70 %
 longer than the README's estimate.
 
+*Throughput at 400 VUs* (closed loop, MEASURE window; `throughput-20261114`,
+reverse order `throughput-reverse-20261114`, SAMM with its counters
+`throughput-samm-polled-20261114`):
+
+| | glibc | jemalloc | SAMM |
+| :--- | ---: | ---: | ---: |
+| Throughput, forward order | 1,153 req/s | 881.2 | 1,185 |
+| Throughput, reverse order | OOM-killed | 876 | 1,184 |
+| SAMM against each (forward) | +2.7 % | +34.5 % | |
+| CPU used (user / kernel) | 1.00 (0.92 / 0.08) | 1.00 (0.82 / 0.18) | 0.99 (0.93 / 0.07) |
+| Page faults per request | 10.2 | 81.4 | 4.83 |
+| Peak memory | 982.0 MB | 806.4 MB | 909.3 MB |
+
+SAMM with its counters polled: 1,189 req/s, so polling did not change it.
+Drift between the two orders is under 1 % for SAMM and jemalloc. glibc
+survived the forward run at 982 MB and was OOM-killed in the reverse run: at
+this load it sits at the limit, as calibration predicted.
+
+*Latency, shared rates* (open loop, `latency-shared-20261114`; one container
+per allocator for the whole sweep):
+
+| Processing time, p95 / p99 (ms) | glibc | jemalloc | SAMM |
+| :--- | ---: | ---: | ---: |
+| 20 req/s | 3.01 / 5.23 | 4.26 / 6.92 | 2.29 / 4.31 |
+| 160 req/s | 7.37 / 10.9 | 8.62 / 12.2 | 5.29 / 9.16 |
+| 320 req/s | 9.93 / 14.1 | 11.9 / 17.3 | 8.11 / 11.9 |
+| 640 req/s | 18.8 / 29.9 | 35.1 / 55.6 | 14.7 / 20.4 |
+| 830 req/s | 41.2 / 59.7 | OOM-killed | 22.1 / 32.1 |
+
+- jemalloc was OOM-killed at the start of the 830 step (95 % of its
+  capacity). Its memory read 721 MiB a second before, so the spike was shorter
+  than the 1 s sampling. The report then marks every jemalloc step "not flat"
+  because the container's fate is applied to the whole sweep: read jemalloc's
+  steps up to 640 from the numbers, not the verdict column.
+- The flatness gate (p95 at most 1.5 times the 20 req/s step) fails from 80 or
+  160 req/s for everyone, because p95 at 20 req/s is only 2-4 ms. The table
+  above is the comparison; "where queueing starts" is not informative here.
+
+*Latency at each allocator's own 80 % and 95 %:* the first attempt
+(`latency-own-20261114`) is **invalid**. k6 creates every step's VUs before
+the test begins, about 12 minutes at these rates, while the server sits idle;
+the first step then hit a cold server at 702-930 req/s, and all three were
+OOM-killed within about 4 seconds (SAMM: 20 MiB to 929 MiB). That is a harness
+artefact, not an allocator result. Re-run with a warm-up ramp
+(160, 320, 640 req/s, then the 80 % and 95 % steps): `latency-own-warm-20261114`.
+
 ## Phase 9: external validation, the main study (about 2 days of machine time)
 
 1. **Pilot:** 2-3 runs at the locked k, to confirm stability.
