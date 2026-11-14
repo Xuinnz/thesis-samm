@@ -338,6 +338,34 @@ All allocators (glibc, jemalloc, SAMM; plus the variants if ready), final table:
 6. Optional (ISMM): a GC-instrumented pass at saturation (with the corrected
    labels and the GC `flags`), huge-page counters, the live-bytes counter.
 
+**Run 2026-11-13/14** (frozen table, chunk mode, `LOAD_K=2.5` as in Phase 5,
+seed 20250911, host probe clean). Two fixes first, both in `run.sh`: the samm
+config was not given `SAMM_BUFFER_MODE`, so it would have run in detach mode;
+and a relative `RESULTS_DIR` made k6 fail at once.
+
+*Calibration* (`calibrate-20261113-232648`, `CAL_VUS=50,...,500`):
+
+| | glibc | jemalloc | SAMM |
+| :--- | ---: | ---: | ---: |
+| Capacity | 1,092 req/s | 877 req/s | 1,163 req/s |
+| Saturated (>= 98 % CPU) from | 400 VUs | 300 VUs | 400 VUs |
+| Peak memory at 400 VUs | 949.6 MB | 787.5 MB | 963.1 MB |
+| At 500 VUs | OOM-killed | survived, 912.2 MB | OOM-killed |
+| Processing p95 at 300 VUs | 28.5 ms | 62.2 ms | 17.6 ms |
+
+SAMM's capacity is up from 1,128 (Phase 5: β = 0.75, detach) to 1,163.
+`calibration_report.py`: NOT FEASIBLE as measured (no VU count at or above
+the highest knee was safe for every config). **Decided 2026-11-14 (user):
+throughput at `SATURATION_VUS=400` for all three**, the highest knee with no
+margin, the same closed-loop pressure for every allocator. An OOM kill during
+the run is reported as that allocator's result: capacity not sustainable in
+1 GiB.
+
+*Latency:* the report's sweep `20,40,80,160,320,640,830` for all three, then
+each at 80 % and 95 % of its own capacity (glibc 874, 1,037; jemalloc 702, 833;
+SAMM 930, 1,105). About 18 minutes per config for the seven-rate sweep, 70 %
+longer than the README's estimate.
+
 ## Phase 9: external validation, the main study (about 2 days of machine time)
 
 1. **Pilot:** 2-3 runs at the locked k, to confirm stability.
