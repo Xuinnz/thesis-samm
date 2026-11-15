@@ -206,6 +206,15 @@ back_to_main() {
 }
 
 # -------------------------------------------------------------------- main
+# One study.sh at a time on a machine. infra/vm.sh tests this lock before it
+# starts another, and before it pulls.
+case "${1:-}" in
+  pilot|main|gc|extra-mem|extra-weeks)
+    mkdir -p "$REPO_ROOT/results"
+    exec 9> "$REPO_ROOT/results/.study.lock"
+    flock -n 9 || fail "another study.sh is running on this machine." ;;
+esac
+
 case "${1:-}" in
   preflight)
     preflight any ;;

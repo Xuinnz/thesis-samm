@@ -498,14 +498,52 @@ chain stops if one fails) and `/proc/stat` logged between parts
 
 ## Phase 9: external validation, the main study (about 2 days of machine time)
 
-1. **Pilot:** 2-3 runs at the locked k, to confirm stability.
-2. **Main study:** `K=2.0 N=100 CONDITIONS="jemalloc samm" CPUSET_CPUS=1
-   K6_TASKSET=2,3 RESULTS_DIR=benchmark-results/main-study
-   server/scripts/run_replicates.sh` (check the plan first with `DRY_RUN=1`):
-   **n = 100**, paired seeds (one seed per replicate, shared by both), rotated
-   order, **10-minute runs**, resumable. About **40 h** (~12 min per run).
-3. A small **GC-instrumented pass** (clean pass for metrics, instrumented pass
-   for GC only, as in gc-control).
+**From here to the end of the thesis every run is one command**
+(`server/scripts/study.sh`, written and rehearsed 2026-11-15, before any
+main-study run). It takes every setting from `infra/study.env` (k, pinning,
+buffer mode, probe settings, seeds) and none from the shell, checks the
+machine before it runs anything, is resumable, and refuses rather than guesses.
+From the laptop:
+
+```bash
+infra/vm.sh start && infra/vm.sh update     # pull; refuses while anything runs on the VM
+infra/vm.sh study pilot                     # start it detached; the VM powers off when it ends
+infra/vm.sh wait                            # repeat until it says the VM is off
+infra/vm.sh start && infra/vm.sh fetch benchmark-results/main-study-pilot
+```
+
+| Step | Command (after `infra/vm.sh study`) | Time | Results folder |
+| :--- | :--- | :--- | :--- |
+| 1. Pilot, 2 replicates, end to end | `pilot` | 1 h | `benchmark-results/main-study-pilot` |
+| 2. **Main study, n = 100** | `main` | 42 h | `benchmark-results/main-study` |
+| 3. GC pass, 3 replicates with the GC observer on | `gc` | 1.3 h | `benchmark-results/main-study-gc` |
+
+What each run does, in order: preflight (tools, a clean checkout on `main`,
+no other container or benchmark, the pinning fits, the probe reference
+exists); the runs, through `run_replicates.sh`; then the integrity check, the
+statistics and the figures (Phase 11), written under `<folder>/stats/`.
+
+Three protections added on 2026-11-15, all before any main-study data:
+
+- **Campaign lock.** The first start writes `campaign.json` into the results
+  folder: load point, seeds, pinning, buffer mode, the table's hash and a hash
+  of every file the measured system is built from. A resume with anything
+  different is refused, so one folder never mixes two configurations.
+- **Host probe inside the campaign.** The full probe runs before the first
+  replicate of every start, before every 10th replicate (about every four
+  hours) and after the last one. A failed probe waits ten minutes and tries
+  again, up to six times, then stops the campaign (it resumes later). Every
+  attempt is in `host-health.tsv`. This is the runbook's "probe before every
+  batch and daily", built in, after the VM slowed by up to 18 % inside one
+  boot on 2026-11-15 (Phase 8, launch 1). The order rotation already makes a
+  slow stretch hit both conditions alike; the probe says when one happened.
+- **Each result records more:** the buffer mode asked for and SAMM's count of
+  shared Buffers (the allocator's own evidence of the mode it ran in), whether
+  telemetry was on, the git commit, and the hypervisor's steal time.
+
+If a command prints `REFUSED`, read the reason; do not work around it. The
+overrides that exist (`CAMPAIGN_ALLOW_CHANGE=1`, `--allow-integrity-errors`)
+are recorded in the results and reported by the statistics.
 
 ## Phase 10: the panel's extra results (about 27 h of machine time at n = 15)
 
@@ -519,24 +557,25 @@ result file records its `mem_limit_mb` and `traffic_batch`. Tooling written and
 tested on the laptop 2026-11-13 (2 GB and 4 GB tables compile and pass the
 allocator's tests; one short 2 GB run on week-2 traffic).
 
-**(a) 2 GB and 4 GB limits** (about 7 h each). Same load as the main study, so
+**(a) 2 GB and 4 GB limits** (about 8 h each). Same load as the main study, so
 memory stops being the constraint and the comparison shifts to CPU per request,
-latency and how much memory each side holds. For each limit (2048m, then 4096m):
+latency and how much memory each side holds.
 
 ```bash
-git switch -c extras/mem-2048m
-# Profile in a container of this size, retrain, compile, run the allocator's tests (~16 min).
-MEM_LIMIT=2048m SKIP_BENCHMARK=1 server/scripts/run_full_pipeline.sh
-# β at this limit, exactly as in Phase 6: measure, recompile, confirm.
-MEM_LIMIT=2048m K=2.0 N=1 CONDITIONS=samm POLL_SAMM_STATS=1 RESULTS_DIR=benchmark-results/beta-mem2048m-pass1 server/scripts/run_replicates.sh
-server/scripts/derive_beta.py benchmark-results/beta-mem2048m-pass1/r01-samm-samm-stats.jsonl
-SAMM_BETA_UTILIZATION=<β> bash ml-refinery/run_ml_refinery.sh
-MEM_LIMIT=2048m K=2.0 N=1 CONDITIONS=samm POLL_SAMM_STATS=1 RESULTS_DIR=benchmark-results/beta-mem2048m-pass2 server/scripts/run_replicates.sh
-git commit -am "data(vm): routing table for a 2 GB container"
-# The runs (6 h): detached, and the VM powers off when they finish.
-nohup infra/then-poweroff.sh results/extras-mem2048m.log env MEM_LIMIT=2048m SCHEDULE_SEED=20261300 K=2.0 N=15 CONDITIONS="jemalloc samm" server/scripts/run_replicates.sh &
-git switch main        # only after the runs have finished
+infra/vm.sh study extra-mem 2048m      # then, when the VM is off and restarted:
+infra/vm.sh study extra-mem 4096m
 ```
+
+Each does, on its own branch (`extras/mem-2048m`): profile in a container of
+that size, retrain, compile, run the allocator's tests; β exactly as in Phase 6
+(a SAMM run with its counters, `derive_beta.py`, recompile, a confirming run);
+commit the table on that branch; 15 replicates of both conditions; statistics;
+back to `main`, checking that `main`'s table is still the main study's. It
+stops, without running the 15 replicates, if a β run dies or if the confirming
+run gives a smaller β than the one applied (the method iterates once; a second
+iteration is a person's decision). A β above 1 is applied as 1.0: the pool
+cannot be larger than the container allows. Interrupted, the same command
+continues from the step it reached (`benchmark-results/extras-state/`).
 
 - The quota step takes the container size from the trace's own record
   (`workload_manifest.json`), so a recompile on this branch is sized for 2 GB
@@ -555,13 +594,11 @@ built and committed under `datasets/azure-trace-2019/processed/{d01-d07,d08-d14}
 (the VM has no raw trace and needs none):
 
 ```bash
-git switch -c extras/week1
-TRAFFIC_BATCH=d01-d07 SKIP_BENCHMARK=1 server/scripts/run_full_pipeline.sh
-# β as in Phase 6, with TRAFFIC_BATCH=d01-d07 on each run_replicates.sh line, then commit.
-nohup infra/then-poweroff.sh results/extras-weeks.log bash -c '
-  TRAFFIC_BATCH=d01-d07 SCHEDULE_SEED=20261300 K=2.0 N=15 CONDITIONS="jemalloc samm" server/scripts/run_replicates.sh &&
-  TRAFFIC_BATCH=d08-d14 SCHEDULE_SEED=20261300 K=2.0 N=15 CONDITIONS="jemalloc samm" server/scripts/run_replicates.sh' &
+infra/vm.sh study extra-weeks
 ```
+
+On branch `extras/week1`: the table is trained on days 1-7 (β as above), then
+15 replicates on days 1-7 traffic and 15 on days 8-14, same seeds.
 
 How the batches are built (`preprocessing/phase1-azure-simulation/_batch.py`):
 `AZURE_DAYS=1-7 bash run_phase1.sh`, then
@@ -619,22 +656,49 @@ reaches the server. Surge against off-peak is what the load levels (k) show.
 
 ## Phase 11: statistics and reporting
 
-`venv/bin/python stats-eval/hypothesis-testing/main_study_stats.py
-benchmark-results/main-study` (written and tested 2026-11-13, before any
-main-study data). As the approved methodology states: Shapiro-Wilk and Levene, then
-an independent-samples t-test or Mann-Whitney U; Bonferroni across the three
+Every `study.sh` run ends with its own statistics, so nothing has to be
+started by hand. To redo them for everything that exists (on the VM or, after
+`infra/vm.sh fetch benchmark-results`, on a copy): `server/scripts/study.sh
+stats`. Under each results folder's `stats/`:
+
+| File | What it is |
+| :--- | :--- |
+| `report.txt` | integrity, run completion, the three primary tests, supporting measures, the paired supplement, the host-health sensitivity check |
+| `tables.md` | Chapter 4's three tables, filled in |
+| `tests.csv`, `descriptives.csv`, `survival.csv` | the same numbers, unrounded |
+| `host_sensitivity.csv` | only if a host probe failed: the tests again without the replicates before it |
+| `figures/primary_distributions.png`, `figures/campaign_order.png` | every run per metric; the metrics in campaign order |
+
+and, at the top level, `benchmark-results/extras-summary.md` (the main study
+and every extra side by side) and `main-study-gc/gc_summary.md`.
+
+The method is the approved one (`main_study_stats.py`, written 2026-11-13
+before any main-study data): Shapiro-Wilk and Levene, then an
+independent-samples t-test or Mann-Whitney U; Bonferroni across the three
 metrics (α = 0.017); the relative percentage difference per metric; survival
-counts and full-window throughput if any run was killed; the Layer 1 oracle matrix
-(Phase 4 step 5); figures.
+counts and full-window throughput if any run was killed. Two additions of
+2026-11-15, also before any data, neither of which changes a test:
+
+- **Integrity gate** (`verify_campaign.py`). The folder must be one coherent
+  sample: complete, each replicate's two runs on one seed and in the planned
+  order, one routing table, the buffer mode that was asked for, no telemetry.
+  Otherwise nothing is tested and the reason is printed.
+- **Host-health sensitivity.** If a host probe failed, the replicates between
+  the last passed probe and the failed one are tested again without, and the
+  report says whether any decision changes. Reported beside the main result,
+  never instead of it.
+
+Also for the write-up: the Layer 1 oracle matrix (Phase 4 step 5).
 
 ---
 
 ## Operations
 
-- **Long jobs:** inside `tmux`, through `infra/then-poweroff.sh <log>
-  <command...>`: the job survives a dropped SSH session and the VM powers off
-  when it ends, so it stops costing money. Scripts are resumable. Use
-  `KEEP_ON=1` when another job follows.
+- **Long jobs:** `infra/vm.sh study <command>` from the laptop (Phase 9). It
+  starts the job through `infra/then-poweroff.sh`, detached: it survives a
+  dropped SSH session and the VM powers off when it ends, so it stops costing
+  money. While it runs, only `infra/vm.sh wait` and `status`: they ask Google,
+  not the VM. Scripts are resumable.
 - **Health:** probe before every batch and daily. Note VM restarts and Google
   maintenance events; discard an interrupted run, never patch it.
 - **Backups:** copy results off the VM after each phase

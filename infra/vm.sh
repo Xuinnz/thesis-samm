@@ -8,6 +8,11 @@
 #   infra/vm.sh status     RUNNING / TERMINATED, and its external address
 #   infra/vm.sh ssh        open a shell on it
 #   infra/vm.sh fetch DIR  copy ~/samm-final/DIR from the VM into ./vm-results/
+#   infra/vm.sh update     git pull on the VM (refuses while anything is running there)
+#   infra/vm.sh study CMD  start server/scripts/study.sh CMD on the VM, detached; the VM
+#                          powers off when it ends (CMD: pilot, main, gc, extra-mem 2048m,
+#                          extra-mem 4096m, extra-weeks). Prints the first lines of its log.
+#   infra/vm.sh wait       block until the VM is off (at most WAIT_MINUTES, default 25)
 #   infra/vm.sh delete     delete the VM AND ITS DISK (asks first)
 #
 # Settings (environment): GCP_PROJECT (required), GCP_ZONE (default
@@ -44,10 +49,48 @@ case "${1:-}" in
     mkdir -p vm-results
     "${G[@]}" scp --recurse --zone "$ZONE" "$NAME:~/samm-final/$dir" vm-results/
     ;;
+  update)
+    # Never while a run is in progress: the run's scripts would change under it.
+    "${G[@]}" ssh "$NAME" --zone "$ZONE" --command 'cd ~/samm-final &&
+      if [ -n "$(docker ps -q)" ] || ! flock -n results/.study.lock true || pgrep -f "[r]un_replicates.sh|[i]nternal-validation/run.sh|[h]ost-probe.sh" >/dev/null; then
+        echo "REFUSED: something is running on the VM. Wait for it (infra/vm.sh wait)."; exit 1; fi
+      git status -sb | head -5 && git pull --ff-only && git log -1 --format="now at %h %s"'
+    ;;
+  study)
+    shift
+    case "${1:-}" in
+      pilot|gc)    deadman=240 ;;
+      main)        deadman=3600 ;;
+      extra-mem)   deadman=900 ;;
+      extra-weeks) deadman=1500 ;;
+      *) echo "usage: infra/vm.sh study <pilot | main | gc | extra-mem 2048m | extra-mem 4096m | extra-weeks>"; exit 2 ;;
+    esac
+    log="results/study-$(echo "$*" | tr ' ' '-')-$(date -u +%Y%m%d-%H%M).log"
+    # The shutdown timer is a backstop for a hang; then-poweroff.sh powers the
+    # VM off itself when the job ends, whatever its outcome.
+    # Checked here, before then-poweroff.sh is started: a second launch that
+    # was refused later would still power the VM off under the first one.
+    # (study.sh holds results/.study.lock for as long as it runs.)
+    "${G[@]}" ssh "$NAME" --zone "$ZONE" --command "cd ~/samm-final && mkdir -p results &&
+      if ! flock -n results/.study.lock true || pgrep -f '[r]un_replicates.sh|[i]nternal-validation/run.sh' >/dev/null; then
+        echo 'REFUSED: a run is already in progress on the VM.'; exit 1; fi
+      sudo shutdown -h +$deadman >/dev/null 2>&1
+      (setsid nohup infra/then-poweroff.sh $log server/scripts/study.sh $* > /dev/null 2>&1 < /dev/null &)
+      sleep 25; echo \"log: ~/samm-final/$log\"; tail -n 30 $log"
+    ;;
+  wait)
+    # Only asks Google for the VM's state: nothing runs on the VM itself.
+    end=$((SECONDS + ${WAIT_MINUTES:-25} * 60))
+    until [ "$("${G[@]}" instances describe "$NAME" --zone "$ZONE" --format 'value(status)')" = "TERMINATED" ]; do
+      [ "$SECONDS" -lt "$end" ] || { echo "still running at $(date -u +%H:%M) UTC"; exit 1; }
+      sleep 60
+    done
+    echo "VM is off ($(date -u +%H:%M) UTC)"
+    ;;
   delete)
     read -r -p "Delete $NAME and its disk, with everything on it? Type the VM name to confirm: " answer
     [ "$answer" = "$NAME" ] || { echo "not deleted"; exit 1; }
     "${G[@]}" instances delete "$NAME" --zone "$ZONE" --quiet
     ;;
-  *) sed -n '3,18p' "$0"; exit 2 ;;
+  *) sed -n '3,23p' "$0"; exit 2 ;;
 esac
