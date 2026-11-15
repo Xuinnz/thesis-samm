@@ -40,7 +40,7 @@ SCOPE_FILE="$REPO_ROOT/datasets/shadow-telemetry/raw/scope_trace.csv"
 K6_SCENARIO_DIR="$REPO_ROOT/load-generator/k6-scenarios"
 K6_SCENARIO_FILE="samm-load-test.js"
 
-BASE_URL="${BASE_URL:-http://localhost:3000}"
+BASE_URL="${BASE_URL:-http://localhost:${HOST_PORT:-3000}}"
 HEALTH_URL="$BASE_URL/health"
 
 # k6 traffic parameters — override via env var. The defaults are the k = 1.0

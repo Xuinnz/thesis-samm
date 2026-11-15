@@ -22,7 +22,7 @@ services:
     image: samm-baseline:latest
     container_name: samm-characterization
     ports:
-      - "3000:3000"
+      - "${HOST_PORT:-3000}:3000"
     environment:
       SHADOW_PROFILER_ENABLED: "true"
       # Concurrently-tracked objects the profiler can hold. Overridable because
@@ -90,7 +90,7 @@ services:
     image: samm-baseline:latest
     container_name: samm-baseline-benchmark
     ports:
-      - "3000:3000"
+      - "${HOST_PORT:-3000}:3000"
     environment:
       SHADOW_PROFILER_ENABLED: "false"
       SAMM_TOUCH_FRACTION: "${SAMM_TOUCH_FRACTION:-}"
