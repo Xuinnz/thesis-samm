@@ -281,6 +281,10 @@ run_condition() {
     nr_throttled_before=$(echo "$cpu_before" | awk '/^nr_throttled/{print $2}'); : "${nr_throttled_before:=0}"
 
     log "Running k6: ${SIMULATION_MINUTES}m, RPS ${MIN_RPS}-${MAX_RPS}, VUs ${PRE_ALLOCATED_VUS}-${MAX_VUS}, seed ${SCHEDULE_SEED}${TRAFFIC_BATCH:+, traffic batch $TRAFFIC_BATCH}"
+    # The host's own CPU counters over the run: steal is time the hypervisor
+    # gave this VM's cores to something else. Recorded, never used to decide.
+    local host_cpu_before host_cpu_after
+    host_cpu_before=$(grep '^cpu ' /proc/stat 2>/dev/null || true)
     local window_start
     window_start=$(date +%s)
     (
@@ -313,6 +317,7 @@ run_condition() {
     # no sampling, so no chance of missing a transient spike between polls.
     local window_secs=$(( $(date +%s) - window_start ))
     [ "$window_secs" -le 0 ] && window_secs=1
+    host_cpu_after=$(grep '^cpu ' /proc/stat 2>/dev/null || true)
 
     # Stop the poller before the final reads so it cannot race them.
     if [ -n "$poller_pid" ]; then kill "$poller_pid" 2>/dev/null || true; wait "$poller_pid" 2>/dev/null || true; fi
@@ -389,6 +394,10 @@ run_condition() {
     BENCH_ORDER="${RUN_ORDER:-}" BENCH_ORDER_POSITION="${RUN_ORDER_POSITION:-}" \
     BENCH_CPUSET="$CPUSET_CPUS" BENCH_K6_TASKSET="$K6_TASKSET" BENCH_TRAFFIC_BATCH="$TRAFFIC_BATCH" \
     BENCH_END_STATUS="$end_status" BENCH_END_OOM="$end_oom" BENCH_END_EXIT="$end_exit" BENCH_DIED_AFTER="$died_after" \
+    BENCH_BUFFER_MODE="${SAMM_BUFFER_MODE:-}" BENCH_TELEMETRY="$SAMM_TELEMETRY" BENCH_ALLOC_JSON="$alloc_json" \
+    BENCH_GIT_COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)" \
+    BENCH_GIT_DIRTY="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no 2>/dev/null | wc -l)" \
+    BENCH_HOST_CPU_BEFORE="$host_cpu_before" BENCH_HOST_CPU_AFTER="$host_cpu_after" \
     "$PYTHON_BIN" - "$summary_json" "$result_json" "$BENCH_LABEL" "$peak_bytes" "$oom_kills" \
         "$mem_limit_bytes" "$cpu_usage_usec" "$cpu_throttled_usec" "$cpu_nr_throttled" \
         "$window_secs" "$MAX_RPS" "$CPUS" "$SIMULATION_MINUTES" "$page_faults" <<'PYEOF'
@@ -446,6 +455,27 @@ expected_secs = float(sim_minutes_expected) * 60 + K6_FIXED_OVERHEAD_S
 overshoot = (float(window_secs) / expected_secs) if expected_secs > 0 else 1.0
 timing_suspect = overshoot > 1.25
 
+def host_cpu():
+    """Share of all cores' time that was stolen by the hypervisor, and that was busy, over the run."""
+    try:
+        a = [int(x) for x in os.environ["BENCH_HOST_CPU_BEFORE"].split()[1:9]]
+        b = [int(x) for x in os.environ["BENCH_HOST_CPU_AFTER"].split()[1:9]]
+        d = [y - x for x, y in zip(a, b)]          # user nice system idle iowait irq softirq steal
+        total = sum(d)
+        return round(100.0 * d[7] / total, 3), round(100.0 * (total - d[3] - d[4]) / total, 1)
+    except (KeyError, IndexError, ValueError, ZeroDivisionError):
+        return None, None
+
+def samm_shared_buffers():
+    """SAMM's count of Buffers handed out as views of a shared chunk: above zero only in chunk/view mode."""
+    try:
+        with open(os.environ["BENCH_ALLOC_JSON"]) as f:
+            return json.load(f).get("sharedBuffers")
+    except (KeyError, OSError, ValueError, AttributeError):
+        return None
+
+host_steal_pct, host_busy_pct = host_cpu()
+
 result = {
     "condition": label,
     "max_rps": float(max_rps),
@@ -500,6 +530,16 @@ result = {
     "k6_taskset": os.environ.get("BENCH_K6_TASKSET") or None,
     # Which Phase 1 batch drove k6; "all days" is the default models.
     "traffic_batch": os.environ.get("BENCH_TRAFFIC_BATCH") or "all days",
+    # Provenance added 2026-11-15, before the main study. The buffer mode is
+    # what the harness asked for (empty = the addon's default, detach);
+    # samm_shared_buffers is the allocator's own evidence of the mode it ran in.
+    "samm_buffer_mode_requested": os.environ.get("BENCH_BUFFER_MODE") or None,
+    "samm_shared_buffers": samm_shared_buffers(),
+    "telemetry_enabled": os.environ.get("BENCH_TELEMETRY") == "true",
+    "git_commit": os.environ.get("BENCH_GIT_COMMIT") or None,
+    "git_dirty_files": int(os.environ["BENCH_GIT_DIRTY"]) if os.environ.get("BENCH_GIT_DIRTY", "").strip().isdigit() else None,
+    "host_steal_pct": host_steal_pct,
+    "host_busy_pct": host_busy_pct,
 }
 if result["requests"]:
     result["page_faults_per_request"] = round(int(page_faults) / result["requests"], 1)

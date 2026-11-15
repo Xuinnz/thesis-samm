@@ -30,6 +30,24 @@
 # is long enough that a laptop sleeping through it is a real possibility -- and
 # that already happened once in this project.
 #
+# CAMPAIGN LOCK. The first start writes RESULTS_DIR/campaign.json: the load
+# point, seeds, pinning, buffer mode, the routing table's hash and a hash of
+# every file the measured system is built from. A later start (a resume)
+# refuses to add runs if any of those changed, so one folder never mixes two
+# configurations. REQUIRE_CLEAN=1 also refuses uncommitted changes to those
+# files. CAMPAIGN_ALLOW_CHANGE=1 overrides, and the change is written into
+# campaign.json where the statistics will report it.
+#
+# HOST HEALTH. PROBE_EVERY=n runs the host probe (internal-validation/
+# host-probe.sh, full) before the first replicate of every start, then before
+# every n-th, and once at the end. A failed probe waits PROBE_RETRY_WAIT_S
+# (600) and tries again, up to PROBE_RETRIES (6) times, then stops the campaign
+# (exit 3; resume later). Every attempt is logged in RESULTS_DIR/
+# host-health.tsv; the replicates between a passed probe and the next failed
+# one are the ones the statistics' sensitivity check leaves out. Added
+# 2026-11-15 after the VM slowed by up to 18 % within one boot (runbook,
+# Phase 8, launch 1). PROBE_EVERY=0 (default) is off.
+#
 # WHY TEN MINUTES AND NOT THREE
 #
 # Three-minute runs mislead, measured twice. At the 2MB write cap they put SAMM
@@ -91,7 +109,9 @@ if [[ " ${CONDS[*]} " == *" samm "* ]] && [ "${SUMMARY_ONLY:-0}" != "1" ] && [ -
     exit 1
   fi
 fi
-export SHADOW_PROFILER_ENABLED=false SAMM_TELEMETRY=false
+# SAMM_TELEMETRY=true is for the GC pass only (study.sh gc): the GC observer
+# perturbs the run, and the statistics refuse runs that had it on.
+export SHADOW_PROFILER_ENABLED=false SAMM_TELEMETRY="${SAMM_TELEMETRY:-false}"
 export PROCESS_MAX_BYTES=$((16*1024*1024))
 export SAMM_RECLAIM_POLICY=none SAMM_WARMUP=false
 export MAX_RPS PROCESS_HOLD_MS HOLD_SCALE
@@ -134,6 +154,114 @@ source "$SCRIPT_DIR/_bench-lib.sh"
 
 JEMALLOC_SO="${JEMALLOC_SO:-/usr/lib/x86_64-linux-gnu/libjemalloc.so.2}"
 
+# --- campaign lock -----------------------------------------------------------
+# Files the measured system is built from. A change to any of them makes a
+# different system; documentation and analysis scripts are not in the list.
+MEASURED_PATHS=(server/routes server/baseline-v8 server/samm-enabled profiler zig-allocator/src
+  zig-allocator/build.zig zig-allocator/index.js zig-allocator/workload_check.js
+  zig-allocator/workload_fingerprint.json docker load-generator
+  server/scripts/_bench-lib.sh server/scripts/run_replicates.sh
+  "datasets/azure-trace-2019/processed${TRAFFIC_BATCH:+/$TRAFFIC_BATCH}")
+campaign_lock() {
+  local dirty
+  dirty=$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no -- "${MEASURED_PATHS[@]}" 2>/dev/null | wc -l) || true
+  if [ "${REQUIRE_CLEAN:-0}" = "1" ] && [ "$dirty" -gt 0 ]; then
+    echo "ERROR: REQUIRE_CLEAN=1 and $dirty measured file(s) have uncommitted changes:"
+    git -C "$REPO_ROOT" status --porcelain --untracked-files=no -- "${MEASURED_PATHS[@]}" | sed 's/^/         /'
+    exit 1
+  fi
+  CAMPAIGN_K="$K" CAMPAIGN_N="$N" CAMPAIGN_CONDS="${CONDS[*]}" CAMPAIGN_ROTATE="$ROTATE" \
+  CAMPAIGN_BASE_SEED="$BASE_SEED" CAMPAIGN_VARY_SEED="$VARY_SEED" CAMPAIGN_DIRTY="$dirty" \
+  CAMPAIGN_SYSTEM_SHA="$( { git -C "$REPO_ROOT" ls-files -s -- "${MEASURED_PATHS[@]}"; git -C "$REPO_ROOT" diff HEAD -- "${MEASURED_PATHS[@]}"; } 2>/dev/null | sha256sum | cut -d' ' -f1)" \
+  CAMPAIGN_TABLE_SHA="$(sha256sum "$REPO_ROOT/zig-allocator/src/routing-table/model_weights.zig" | cut -d' ' -f1)" \
+  CAMPAIGN_GIT="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)" \
+  CAMPAIGN_BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || true)" \
+  CAMPAIGN_THP="$(cat /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || true)" \
+  CAMPAIGN_DOCKER="$(docker version -f '{{.Server.Version}}' 2>/dev/null || true)" \
+  CAMPAIGN_K6="$(k6 version 2>/dev/null | head -1 || true)" \
+  CAMPAIGN_MACHINE="$(curl -s -m 2 -H 'Metadata-Flavor: Google' http://metadata.google.internal/computeMetadata/v1/instance/machine-type 2>/dev/null | sed 's|.*/||' || true)" \
+  "$PYTHON_BIN" - "$RESULTS_DIR/campaign.json" "$TABLE_FINGERPRINT" <<'PYEOF' || exit 1
+import datetime, json, os, platform, sys
+path, fingerprint_path = sys.argv[1:3]
+e = os.environ
+try:
+    fingerprint = json.load(open(fingerprint_path)).get("fingerprint")
+except (OSError, ValueError):
+    fingerprint = None
+def cpu_model():
+    try:
+        return next(l.split(":", 1)[1].strip() for l in open("/proc/cpuinfo") if l.startswith("model name"))
+    except (OSError, StopIteration):
+        return None
+locked = {   # a resume must match every one of these
+    "k": e["CAMPAIGN_K"], "conditions": e["CAMPAIGN_CONDS"], "rotate": e["CAMPAIGN_ROTATE"],
+    "base_seed": e["CAMPAIGN_BASE_SEED"], "vary_seed": e["CAMPAIGN_VARY_SEED"],
+    "simulation_minutes": e.get("SIMULATION_MINUTES"), "mem_limit": e.get("MEM_LIMIT"),
+    "max_rps": e.get("MAX_RPS"), "hold_scale": e.get("HOLD_SCALE"), "process_hold_ms": e.get("PROCESS_HOLD_MS"),
+    "traffic_batch": e.get("TRAFFIC_BATCH") or "all days",
+    "cpuset_cpus": e.get("CPUSET_CPUS") or None, "k6_taskset": e.get("K6_TASKSET") or None,
+    "samm_buffer_mode": e.get("SAMM_BUFFER_MODE") or None, "samm_segment_reuse": e.get("SAMM_SEGMENT_REUSE") or None,
+    "telemetry": e.get("SAMM_TELEMETRY") == "true",
+    "routing_table_sha256": e["CAMPAIGN_TABLE_SHA"], "workload_fingerprint": fingerprint,
+    "measured_system_sha256": e["CAMPAIGN_SYSTEM_SHA"],
+}
+now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+start = {"at": now, "n_planned": int(e["CAMPAIGN_N"]), "git_commit": e.get("CAMPAIGN_GIT") or None,
+         "git_branch": e.get("CAMPAIGN_BRANCH") or None, "dirty_measured_files": int(e["CAMPAIGN_DIRTY"]),
+         "probe_every": int(e.get("PROBE_EVERY") or 0),
+         "host": {"cpu_model": cpu_model(), "nproc": os.cpu_count(), "kernel": platform.release(),
+                  "docker": e.get("CAMPAIGN_DOCKER") or None, "k6": e.get("CAMPAIGN_K6") or None,
+                  "thp": e.get("CAMPAIGN_THP") or None, "machine_type": e.get("CAMPAIGN_MACHINE") or None}}
+if os.path.exists(path):
+    campaign = json.load(open(path))
+    diff = {k: (campaign["locked"].get(k), v) for k, v in locked.items() if campaign["locked"].get(k) != v}
+    if diff:
+        print("ERROR: this folder's campaign was started with different settings:")
+        for k, (was, now_) in diff.items():
+            print(f"         {k}: was {was!r}, now {now_!r}")
+        if e.get("CAMPAIGN_ALLOW_CHANGE") != "1":
+            print("       Runs under different settings do not belong in one sample. Use another RESULTS_DIR,")
+            print("       or put the settings back. (CAMPAIGN_ALLOW_CHANGE=1 overrides and records the change.)")
+            sys.exit(1)
+        print("       CAMPAIGN_ALLOW_CHANGE=1: continuing; the change is recorded in campaign.json.")
+        campaign.setdefault("changes", []).append({"at": now, "changed": {k: {"was": a, "now": b} for k, (a, b) in diff.items()}})
+        campaign["locked"] = locked
+    campaign["starts"].append(start)
+else:
+    campaign = {"locked": locked, "starts": [start]}
+with open(path, "w") as f:
+    json.dump(campaign, f, indent=2)
+print(f" Campaign : {path} (start {len(campaign['starts'])}; system {locked['measured_system_sha256'][:12]}, "
+      f"table {locked['routing_table_sha256'][:12]})")
+PYEOF
+}
+
+# --- host health -------------------------------------------------------------
+PROBE_EVERY="${PROBE_EVERY:-0}"
+HOST_PROBE_CMD="${HOST_PROBE_CMD:-$REPO_ROOT/internal-validation/host-probe.sh}"
+HEALTH_LOG="$RESULTS_DIR/host-health.tsv"
+# host_gate <replicate about to run, or "end">: probe until clean, or stop the campaign.
+host_gate() {
+  local before="$1" attempt=0 rc dir verdict
+  [ -f "$HEALTH_LOG" ] || printf 'time_utc\tbefore_replicate\tattempt\tverdict\tprobe_dir\n' > "$HEALTH_LOG"
+  while :; do
+    attempt=$((attempt + 1))
+    dir="$RESULTS_DIR/host-health/before-$before-$(date -u +%Y%m%dT%H%M%S)"
+    echo; echo "---------- host probe before replicate $before (attempt $attempt) ----------"
+    rc=0; "$HOST_PROBE_CMD" "$dir" full || rc=$?
+    verdict=$([ "$rc" -eq 0 ] && echo pass || echo fail)
+    printf '%s\t%s\t%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$before" "$attempt" "$verdict" "${dir#"$RESULTS_DIR"/}" >> "$HEALTH_LOG"
+    [ "$rc" -eq 0 ] && return 0
+    if [ "$before" = "end" ]; then echo "Host probe failed after the last replicate (logged)."; return 0; fi
+    if [ "$attempt" -gt "${PROBE_RETRIES:-6}" ]; then
+      echo "ERROR: the host probe failed $attempt times in a row. Stopping; the campaign is resumable."
+      exit 3
+    fi
+    echo "Host not clean. Waiting ${PROBE_RETRY_WAIT_S:-600} s before probing again."
+    sleep "${PROBE_RETRY_WAIT_S:-600}"
+  done
+}
+
 if [ "${SUMMARY_ONLY:-0}" != "1" ]; then
   echo "======================================================================"
   echo " Replicates: n=$N at k=$K, conditions: ${CONDS[*]} ($([ "$ROTATE" = "1" ] && echo 'order rotated each replicate' || echo 'fixed order'))"
@@ -144,12 +272,27 @@ if [ "${SUMMARY_ONLY:-0}" != "1" ]; then
   echo " Results  : $RESULTS_DIR"
   echo " Pinning  : server ${CPUSET_CPUS:-not pinned}, k6 ${K6_TASKSET:-not pinned}"
   echo " Estimate : ~$(( N * ${#CONDS[@]} * 12 / 60 ))h$(( N * ${#CONDS[@]} * 12 % 60 ))m  (resumable; existing results are skipped)"
+  [ "${DRY_RUN:-0}" = "1" ] || campaign_lock
   echo "======================================================================"
 
+  since_probe=$PROBE_EVERY      # so the first replicate of every start is probed
+  if [ "$PROBE_EVERY" -gt 0 ] && [ "${DRY_RUN:-0}" != "1" ]; then
+    # A start marker: a failed probe says nothing about replicates run before this start.
+    [ -f "$HEALTH_LOG" ] || printf 'time_utc\tbefore_replicate\tattempt\tverdict\tprobe_dir\n' > "$HEALTH_LOG"
+    printf '%s\t-\t0\tstart\t-\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$HEALTH_LOG"
+  fi
+  ran_any=0
+  failures_in_a_row=0
   for i in $(seq 1 "$N"); do
     export SCHEDULE_SEED=$([ "$VARY_SEED" = "1" ] && echo $((BASE_SEED + i)) || echo "$BASE_SEED")
     read -r -a order <<< "$(replicate_order "$i")"
     export RUN_ORDER="${order[*]}"
+    pending=0
+    for cond in "${order[@]}"; do [ -f "$RESULTS_DIR/r$(printf '%02d' "$i")-$cond.json" ] || pending=1; done
+    if [ "$pending" = "1" ] && [ "${DRY_RUN:-0}" != "1" ] && [ "$PROBE_EVERY" -gt 0 ]; then
+      if [ "$since_probe" -ge "$PROBE_EVERY" ]; then host_gate "$i"; since_probe=0; fi
+      since_probe=$((since_probe + 1))
+    fi
     echo; echo "########## replicate $i/$N (seed $SCHEDULE_SEED, order: $RUN_ORDER) ##########"
     pos=0
     for cond in "${order[@]}"; do
@@ -157,6 +300,7 @@ if [ "${SUMMARY_ONLY:-0}" != "1" ]; then
       label="r$(printf '%02d' "$i")-$cond"
       if [ -f "$RESULTS_DIR/$label.json" ]; then echo "  [$label] already done, skipping"; continue; fi
       if [ "${DRY_RUN:-0}" = "1" ]; then echo "  [$label] would run (position $pos)"; continue; fi
+      ran_any=1
       case "$cond" in
         glibc)    run_condition "$label" "docker/baseline-environment/Dockerfile" "samm-baseline:bench" "rep-glibc" || echo "[[ $label FAILED ]]" ;;
         jemalloc) run_condition "$label" "docker/baseline-environment/Dockerfile" "samm-baseline:bench" "rep-jem" \
@@ -168,8 +312,17 @@ if [ "${SUMMARY_ONLY:-0}" != "1" ]; then
                     -e SAMM_BUFFER_MODE="${SAMM_BUFFER_MODE:-}" \
                     "${SAMM_EXTRA[@]}" || echo "[[ $label FAILED ]]" ;;
       esac
+      # A run that leaves no result file is a harness failure (a build error,
+      # no k6, a port in use), not a measurement: an OOM-killed container still
+      # writes its file. Three in a row means it will not fix itself.
+      if [ -f "$RESULTS_DIR/$label.json" ]; then failures_in_a_row=0; else failures_in_a_row=$((failures_in_a_row + 1)); fi
+      if [ "$failures_in_a_row" -ge 3 ]; then
+        echo "ERROR: three runs in a row produced no result file. Stopping; fix the cause and start again (resumable)."
+        exit 4
+      fi
     done
   done
+  if [ "$ran_any" = "1" ] && [ "$PROBE_EVERY" -gt 0 ]; then host_gate end; fi
 fi
 
 "$PYTHON_BIN" - "$RESULTS_DIR" "$K" <<'PYEOF'

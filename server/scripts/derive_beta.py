@@ -28,7 +28,12 @@ Reads any of:
                              (allocator.jsonl joined with container.tsv)
   <recording>.jsonl          a demo recording of a SAMM run
 
-Usage: derive_beta.py RUN [--margin-mb 32] [--quotas spatial_quotas.json]
+Usage: derive_beta.py RUN [--margin-mb 32] [--quotas spatial_quotas.json] [--json]
+
+--json prints one JSON object instead of the report (for study.sh, which
+applies the value): beta as derived, beta_to_apply (cut to three decimals and
+capped at 1.0: the pool cannot be larger than POOL_HARD_LIMIT), the current
+table's beta, and the peak outside the pool.
 """
 
 import argparse
@@ -81,6 +86,7 @@ def main():
     ap.add_argument("run")
     ap.add_argument("--margin-mb", type=float, default=32.0)
     ap.add_argument("--quotas", type=Path, default=DEFAULT_QUOTAS)
+    ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
     rows, kind = samples(args.run)
@@ -105,6 +111,14 @@ def main():
 
     c = container - peak[1] - args.margin_mb * MB
     beta = c / pool_limit
+    if args.json:
+        print(json.dumps({
+            "beta": beta, "beta_to_apply": min(1.0, int(beta * 1000) / 1000) if beta > 0 else None,
+            "capped": beta > 1.0, "current_beta": q["beta_utilization_fraction"],
+            "peak_outside_pool_mb": peak[1] / MB, "container_mb": container / MB,
+            "pool_hard_limit_mb": pool_limit / MB, "samples_with_counters": len(live), "samples": len(rows),
+            "capacity_fallbacks": last.get("capacityFallbacks", 0)}))
+        return
     print("=" * 78)
     print(f" beta from {args.run}")
     print(f" ({kind}; {len(live)} of {len(rows)} samples with SAMM counters, "
