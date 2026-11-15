@@ -338,12 +338,19 @@ All allocators (glibc, jemalloc, SAMM; plus the variants if ready), final table:
 6. Optional (ISMM): a GC-instrumented pass at saturation (with the corrected
    labels and the GC `flags`), huge-page counters, the live-bytes counter.
 
-**Run 2026-11-13/14** (frozen table, chunk mode, `LOAD_K=2.5`, seed 20250911,
-host probe clean). Correction (2026-11-15): 2.5 was `run.sh`'s default, not
-Phase 5's locked k = 2.0 (2.5 was the level Phase 5 rejected), so this run's
-holds are 240 ms where the main study's are 300 ms; it ran with 20 % less
-live memory per request than the main study. **Re-run at `LOAD_K=2.0`,
-decided 2026-11-15**, below; the k = 2.5 numbers stay as the first pass. Two fixes first, both in `run.sh`: the samm
+**Run 2026-11-13/14** (frozen table, chunk mode, `LOAD_K=2.5` as in Phase 5's
+calibration, seed 20250911, host probe clean). On the load point (2026-11-15;
+this replaces a wrong note in commit 0b23ce2, which called 2.5 a mistake):
+Phase 5's capacities (880, 1,128 req/s) were calibrated with these same
+k = 2.5 holds, and 2.5 is the k Phase 5's rule selects, the lowest whose
+`MAX_RPS` (1,250) covers every allocator's capacity. The main study stepped
+down to 2.0 only because the baseline did not survive the trace at 2.5. In a
+closed loop the holds set how many requests a user can send, not how much
+memory is live: 400 users offer about 1,238 req/s with k = 2.5 holds (240 ms)
+and about 990 req/s with k = 2.0 holds (300 ms), with the same 400 requests in
+flight. So k = 2.0 cannot saturate glibc or SAMM (capacities 1,092-1,185)
+inside 1 GiB; k = 2.5 can. A k = 2.0 pass was decided 2026-11-15 and is
+recorded below as a supplement. Two fixes first, both in `run.sh`: the samm
 config was not given `SAMM_BUFFER_MODE`, so it would have run in detach mode;
 and a relative `RESULTS_DIR` made k6 fail at once.
 
@@ -459,10 +466,35 @@ artefact, not an allocator result. Re-run with a warm-up ramp
   capacities; against the throughput runs glibc ran at 76 %, SAMM 78.5 %,
   jemalloc 79.7 %.
 
-**Re-run at `LOAD_K=2.0`** (decided 2026-11-15): calibration first (holds 25 %
-longer, so the knees and OOM points may move), then throughput, the reverse
-replicate, the polled SAMM run, the shared sweep and the warmed own-capacity
-sweep, as above. Pass `LOAD_K=2.0` explicitly; `run.sh` still defaults to 2.5.
+**Pass at `LOAD_K=2.0`** (decided 2026-11-15; pass `LOAD_K=2.0` explicitly,
+`run.sh` defaults to 2.5).
+
+*Calibration* (`calibrate-k2-20261115`, host probe clean):
+
+| | glibc | jemalloc | SAMM |
+| :--- | ---: | ---: | ---: |
+| Highest step survived | 350 VUs: 868 req/s, 91 % CPU, 878 MB | 500 VUs | 400 VUs: 985 req/s, 93 % CPU, 968 MB |
+| Reached 98 % CPU | no: OOM-killed at 400 | yes, at 400: 859 req/s | no: OOM-killed at 500 |
+| CPU per request at 350 VUs | 1.05 ms | 1.18 ms | 0.97 ms |
+
+With these holds 400 users offer about 990 req/s, which SAMM serves without
+saturating; only jemalloc is CPU-bound. The throughput figure for SAMM at this
+k is the offered load, a lower bound on its capacity. Decided (user): 400 VUs
+for all, as at k = 2.5.
+
+*Launch 1* (`throughput-k2-*`, `latency-k2-shared-*`, 06:22-08:22 UTC):
+**invalid, host slowed during the run.** jemalloc gave 841 req/s at 06:31 and
+687 at 07:05 (same CPU share, same faults per request); SAMM 983, then
+942-950. In the latency sweep, which ran last, the non-held endpoints' median
+at 160 req/s was about 1.9 times the k = 2.5 pass's for every allocator (1.17
+against 0.59 ms for glibc), while the k = 2.0 calibration, on an earlier boot,
+matched the k = 2.5 pass at low load, so the holds are not the cause. The
+probe was clean before the launch and after the next boot; nothing was
+recorded in between. Kept on the VM, not used.
+
+*Launch 2 of the same* (`*-k2r2-*`): a full host probe before each part (the
+chain stops if one fails) and `/proc/stat` logged between parts
+(`results/p8k2r2-cpustat.log`).
 
 ## Phase 9: external validation, the main study (about 2 days of machine time)
 
