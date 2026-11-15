@@ -63,7 +63,7 @@ def main():
             rel = 100.0 * (dy["mean"] - dx["mean"]) / dx["mean"] if x and y and dx["mean"] else float("nan")
             decision = "n/a" if res["p"] != res["p"] else ("Reject" if res["reject_h0"] else "Fail to reject")
             md.append(f"| {name} | {setting} | {done} | {metric}, {unit} | {mss.fmt(dx['mean'])} ± {mss.fmt(dx['sd'])} "
-                      f"| {mss.fmt(dy['mean'])} ± {mss.fmt(dy['sd'])} | {rel:+.1f}% | {res['test']} | {mss.fmt_p(res['p'])} "
+                      f"| {mss.fmt(dy['mean'])} ± {mss.fmt(dy['sd'])} | {'n/a' if rel != rel else f'{rel:+.1f}%'} | {res['test']} | {mss.fmt_p(res['p'])} "
                       f"| {decision} |")
             name = setting = done = ""
     text = "\n".join(md)
