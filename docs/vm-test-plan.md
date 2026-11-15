@@ -492,9 +492,54 @@ matched the k = 2.5 pass at low load, so the holds are not the cause. The
 probe was clean before the launch and after the next boot; nothing was
 recorded in between. Kept on the VM, not used.
 
-*Launch 2 of the same* (`*-k2r2-*`): a full host probe before each part (the
-chain stops if one fails) and `/proc/stat` logged between parts
-(`results/p8k2r2-cpustat.log`).
+*Launch 2 of the same* (`*-k2r2-*`, 08:35-10:59 UTC): a full host probe
+before each part and after the last (five, **all clean**), `/proc/stat` logged
+between parts (`results/p8k2r2-cpustat.log`; steal reads 0 throughout, so the
+hypervisor does not report it here). **These are the k = 2.0 results.**
+
+*Throughput at 400 VUs, k = 2.0 holds* (closed loop; about 990 req/s offered):
+
+| | glibc | jemalloc | SAMM |
+| :--- | ---: | ---: | ---: |
+| Throughput, forward order | 969.4 req/s | 875.4 | 985.6 |
+| Throughput, reverse order | OOM-killed | 877.6 | 986.6 |
+| CPU used (user / kernel) | 0.98 (0.91 / 0.07) | 1.00 (0.83 / 0.17) | 0.95 (0.89 / 0.05) |
+| CPU per request | 1.01 ms | 1.14 ms | 0.96 ms |
+| Page faults per request | 9.79 | 78.6 | 3.10 |
+| Peak memory | 1,003.7 MB | 844.8 MB | 948.8 MB |
+
+- The two orders agree within 0.3 % for jemalloc and 0.1 % for SAMM (launch 1:
+  18 % and 4 %), and SAMM with its counters polled gave 987.5. Launch 1 was the
+  host.
+- Only jemalloc is CPU-bound (859-878 req/s, as in calibration). SAMM serves
+  the offered load with 5-6 % of the core to spare; its figure is a lower bound
+  on its capacity. glibc serves it at 98 % CPU and at the memory limit: it
+  survived once at 1,003.7 MB and was killed once.
+- SAMM's arena budget is fully granted here too (702.5 MiB), with about 84
+  allocations a second falling back to jemalloc (about 1 request in 12).
+
+*Latency, shared rates, k = 2.0 holds* (open loop; processing time p95 / p99, ms):
+
+| | glibc | jemalloc | SAMM |
+| :--- | ---: | ---: | ---: |
+| 20 req/s | 3.8 / 5.8 | 4.5 / 6.3 | 2.5 / 4.5 |
+| 160 req/s | 7.9 / 11.7 | 9.1 / 13.1 | 6.0 / 10.0 |
+| 320 req/s | 10.8 / 15.3 | 14.1 / 19.7 | 9.2 / 13.4 |
+| 640 req/s | 23.2 / 33.4 | 42.0 / 57.1 | 16.3 / 21.7 |
+| 820 req/s | 67.1 / 111.8 | OOM-killed | 30.3 / 42.9 |
+
+Same order as at k = 2.5 at every rate: SAMM lowest, jemalloc highest and
+killed at 95 % of its capacity. Not run at this k: each allocator at 80 % and
+95 % of its own capacity (glibc and SAMM have no CPU capacity to take a share
+of here; decided 2026-11-15).
+
+**Phase 8 is reported from the k = 2.5 pass** (every allocator CPU-saturated,
+which is what "throughput at saturation" needs); the k = 2.0 pass is its
+supplement: with the main study's holds, SAMM serves the whole offered load
+with CPU to spare, jemalloc saturates, glibc sits at the memory limit
+(decided 2026-11-15, user). Results on the VM under
+`internal-validation/results/`, copies in the laptop's `vm-results/phase8/`
+and `vm-results/phase8-k2/` (without the raw sample files).
 
 ## Phase 9: external validation, the main study (about 2 days of machine time)
 
