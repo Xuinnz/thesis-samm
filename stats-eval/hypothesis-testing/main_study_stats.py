@@ -3,7 +3,12 @@
 Statistics for the main study, as the approved methodology states them.
 
 Written on 2026-11-13, before any main-study run existed, so that nothing about
-the analysis could be chosen after seeing the data.
+the analysis could be chosen after seeing the data. Extended on 2026-11-15,
+still before any main-study run, with two things that do not touch the approved
+tests: an integrity gate (verify_campaign.py: the folder must be one coherent
+sample, or nothing is tested), and a host-health sensitivity check (the same
+tests again without the replicates that ran between a passed host probe and a
+failed one; reported beside the main result, never instead of it).
 
 Input: a run_replicates.sh results folder (rNN-<condition>.json, one per run).
 
@@ -34,6 +39,7 @@ part of the approved method.
 Usage:
   main_study_stats.py RESULTS_DIR [--baseline jemalloc] [--treatment samm]
                       [--duration-s 600] [--with-paired] [--out DIR]
+                      [--expect-n N] [--allow-integrity-errors]
 
 Writes, under RESULTS_DIR/stats (or --out): report.txt, descriptives.csv,
 tests.csv, survival.csv, and tables.md (Chapter 4's tables, filled in).
@@ -49,6 +55,9 @@ import statistics as st
 import sys
 
 from scipy import stats
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import verify_campaign  # noqa: E402
 
 ALPHA = 0.05
 PRIMARY = [
@@ -148,7 +157,16 @@ def main():
     ap.add_argument("--duration-s", type=float, default=600.0, help="scheduled length of one run")
     ap.add_argument("--with-paired", action="store_true", help="add the supplementary paired analysis")
     ap.add_argument("--out")
+    ap.add_argument("--expect-n", type=int, help="replicates the campaign must have (default: what it planned)")
+    ap.add_argument("--allow-integrity-errors", action="store_true",
+                    help="test a folder verify_campaign.py rejects (the errors stay in the report)")
     args = ap.parse_args()
+
+    integrity = verify_campaign.verify(args.results_dir, [args.baseline, args.treatment], args.expect_n)
+    if integrity["errors"] and not args.allow_integrity_errors:
+        print(verify_campaign.report(integrity))
+        sys.exit("\nThe folder is not one coherent sample; nothing was tested. Fix the cause (an unfinished "
+                 "campaign resumes with the same command), or pass --allow-integrity-errors to test it anyway.")
 
     base_runs = load(args.results_dir, args.baseline)
     treat_runs = load(args.results_dir, args.treatment)
@@ -184,6 +202,8 @@ def main():
     p(f" baseline = {args.baseline}, treatment = {args.treatment}; "
       f"Bonferroni alpha = {ALPHA}/{len(PRIMARY)} = {ALPHA_ADJUSTED:.4f}")
     p("=" * 96)
+    p("\n 0. Integrity of the sample (verify_campaign.py)")
+    p(verify_campaign.report(integrity))
     p("\n 1. Run completion")
     p(f" {'':44}{names[args.baseline]:>22}{names[args.treatment]:>22}")
     for label, key in (("Runs attempted", "attempted"), ("Runs completing the workload", "completed"),
@@ -257,6 +277,28 @@ def main():
             p(f" {name:28}{len(d):>4} pairs, mean difference {st.mean(d):+,.2f} {unit}, "
               f"{paired[-1]['test']}, p = {fmt_p(res.pvalue)}")
 
+    # ------------------------------------------- host-health sensitivity
+    sensitivity = []
+    suspects = {f"r{i:02d}" for i in integrity["host_suspect"]}
+    if suspects:
+        p(f"\n 6. Host-health sensitivity: the same tests without {len(suspects)} replicate(s) that ran between a")
+        p("    passed host probe and a failed one (" + " ".join(sorted(suspects)) + ")")
+        keep = lambda runs: [r for r in runs if r["replicate"] not in suspects]
+        for res in tests:
+            x, y = values(keep(base_runs), res["metric"]), values(keep(treat_runs), res["metric"])
+            again = primary_test(x, y)
+            rel = 100.0 * (st.mean(y) - st.mean(x)) / st.mean(x) if x and y and st.mean(x) else math.nan
+            same = again.get("reject_h0") == res.get("reject_h0")
+            sensitivity.append({"metric": res["metric"], "n_baseline": len(x), "n_treatment": len(y),
+                                "test": again["test"], "p": again["p"], "reject_h0": again.get("reject_h0"),
+                                "relative_pct": rel, "decision_unchanged": same})
+            p(f" {res['name']:28}n = {len(x)} / {len(y)}, {again['test']}, p = {fmt_p(again['p'])}, "
+              f"relative change {fmt(rel)} % (all runs: {fmt(res['relative_pct'])} %): "
+              + ("decision unchanged" if same else "DECISION CHANGES"))
+    elif os.path.exists(os.path.join(args.results_dir, "host-health.tsv")):
+        p("\n 6. Host-health sensitivity: no replicate ran between a passed host probe and a failed one;")
+        p("    nothing to leave out.")
+
     report = "\n".join(lines)
     print(report)
     with open(os.path.join(out_dir, "report.txt"), "w") as f:
@@ -284,6 +326,11 @@ def main():
         w.writeheader()
         for cond in (args.baseline, args.treatment):
             w.writerow({"condition": cond, **survival[cond]})
+    if sensitivity:
+        with open(os.path.join(out_dir, "host_sensitivity.csv"), "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=list(sensitivity[0]))
+            w.writeheader()
+            w.writerows(sensitivity)
     if paired:
         with open(os.path.join(out_dir, "paired_supplement.csv"), "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=list(paired[0]))
