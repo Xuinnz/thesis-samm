@@ -71,7 +71,7 @@ preflight() {
     || note "venv/bin/python3 with scipy, numpy and matplotlib is missing (python3 -m venv venv && venv/bin/pip install -r requirements.txt)"
   docker info >/dev/null 2>&1 || note "the Docker daemon is not reachable"
   [ -z "$(docker ps -q 2>/dev/null)" ] || note "containers are running: $(docker ps --format '{{.Names}}' | tr '\n' ' ')(one experiment at a time)"
-  if ss -ltn 2>/dev/null | grep -q ':3000 '; then note "port 3000 is in use"; fi
+  if ss -ltn 2>/dev/null | grep -q ":${HOST_PORT:-3000} "; then note "port ${HOST_PORT:-3000} is in use"; fi
   if pgrep -f "[r]un_replicates.sh|[i]nternal-validation/run.sh|[h]ost-probe.sh" >/dev/null 2>&1; then
     note "another benchmark or probe is running on this machine"
   fi
