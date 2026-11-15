@@ -152,6 +152,10 @@ extra_table() {
   local branch="$1" label="$2" message="$3"; shift 3
   local state="$RESULTS/extras-state/$label" current beta beta2 json
   mkdir -p "$state"
+  # Before the branch is touched: a failure after the switch would leave the
+  # machine on the extra's branch.
+  git config user.name >/dev/null && git config user.email >/dev/null \
+    || fail "git has no user.name / user.email on this machine, so the table could not be committed on $branch. Set them, then run this again."
   current=$(git rev-parse --abbrev-ref HEAD)
   if [ "$current" = "main" ]; then
     check_main_table
@@ -159,8 +163,6 @@ extra_table() {
   elif [ "$current" != "$branch" ]; then
     fail "on branch '$current'. Start this from main (or from $branch, to resume)."
   fi
-  git config user.name >/dev/null && git config user.email >/dev/null \
-    || fail "git has no user.name / user.email here, so the table cannot be committed on $branch."
   if [ -f "$state/table.committed" ]; then
     echo "  the table for $label is already committed on $branch (beta $(cat "$state/beta.txt"))"
     return 0
