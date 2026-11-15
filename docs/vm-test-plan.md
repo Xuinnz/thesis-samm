@@ -597,6 +597,31 @@ If a command prints `REFUSED`, read the reason; do not work around it. The
 overrides that exist (`CAMPAIGN_ALLOW_CHANGE=1`, `--allow-integrity-errors`)
 are recorded in the results and reported by the statistics.
 
+**What each possible result means and what to do about it** (a run that stops
+early, killed runs, a failed probe, a β step that refuses, what the thesis may
+and may not say): `docs/finishing-the-thesis.md`. Read it before acting on any
+result of Phases 9 to 11.
+
+**Pilot, 2026-11-15** (`main-study-pilot`, seeds 20261114-15, through
+`infra/vm.sh study pilot`): the command exited 0, both host probes clean,
+integrity ok, chunk mode confirmed in both SAMM runs (1.47 and 1.54 million
+shared Buffers), 14.2 minutes per run.
+
+| | jemalloc | SAMM |
+| :--- | ---: | ---: |
+| Seed 20261114: peak / processing p99 / throughput | 802.6 MB / 172.5 ms / 751.6 req/s | 844.8 MB / 29.3 ms / 753.7 req/s |
+| Seed 20261115 | **OOM-killed** at 1,020.1 MB, in the run's last seconds (1.4 % of requests failed) | 943.4 MB / 51.9 ms / 785.7 req/s |
+
+The baseline survived seed 20261115 on 2026-11-13 at 964.9 MB (Phase 5's
+pilot) and died on it today: on a heavy seed it sits at the limit, and which
+side of it a run lands on varies. Expect baseline kills in the main study; if
+they pass 10 % of its runs, survival is the principal result (rule of
+2026-11-13).
+
+**Main study launched 2026-11-15 12:17 UTC** (`infra/vm.sh study main`;
+campaign lock: system `be95c55e9d5d`, table `b2318961ebee`). At 14.2 minutes a
+run and eleven probes it should end near 2026-11-17 12:30 UTC.
+
 ## Phase 10: the panel's extra results (about 27 h of machine time at n = 15)
 
 Run after the main study. Every variant retrains the table, so **each one gets
