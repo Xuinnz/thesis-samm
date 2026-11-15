@@ -338,8 +338,12 @@ All allocators (glibc, jemalloc, SAMM; plus the variants if ready), final table:
 6. Optional (ISMM): a GC-instrumented pass at saturation (with the corrected
    labels and the GC `flags`), huge-page counters, the live-bytes counter.
 
-**Run 2026-11-13/14** (frozen table, chunk mode, `LOAD_K=2.5` as in Phase 5,
-seed 20250911, host probe clean). Two fixes first, both in `run.sh`: the samm
+**Run 2026-11-13/14** (frozen table, chunk mode, `LOAD_K=2.5`, seed 20250911,
+host probe clean). Correction (2026-11-15): 2.5 was `run.sh`'s default, not
+Phase 5's locked k = 2.0 (2.5 was the level Phase 5 rejected), so this run's
+holds are 240 ms where the main study's are 300 ms; it ran with 20 % less
+live memory per request than the main study. **Re-run at `LOAD_K=2.0`,
+decided 2026-11-15**, below; the k = 2.5 numbers stay as the first pass. Two fixes first, both in `run.sh`: the samm
 config was not given `SAMM_BUFFER_MODE`, so it would have run in detach mode;
 and a relative `RESULTS_DIR` made k6 fail at once.
 
@@ -435,9 +439,30 @@ artefact, not an allocator result. Re-run with a warm-up ramp
   req/s: SAMM 15.3 against 14.7, jemalloc 38.5 against 35.1, glibc 20.1
   against 18.8), so the latency measurements are reproducible.
 
-**Phase 8 done 2026-11-14**, apart from the optional item 6. Results on the VM
-under `internal-validation/results/`, copies in the laptop's
-`vm-results/phase8/` (without the raw sample files).
+*Checks on the k = 2.5 pass (2026-11-15):*
+- No bug found: every valid run has 0 failed requests, every OOM matches
+  Docker's flag, run order moves throughput under 1 %, polling changes nothing.
+- SAMM against jemalloc reproduces the laptop's October run (+32 % there,
+  +34.5 % here). SAMM against glibc does not (+13.6 % there, +2.7 % here):
+  the laptop container was not pinned and was CFS-throttled in 8.6 of every
+  10 periods (here 0.2-0.3), and kernel time per fault was 2-3 times higher
+  under WSL2, which taxed the fault-heavy configs. The laptop numbers are not
+  comparable; the VM's match the main study's setup.
+- At 400 VUs SAMM's arena budget (702.9 MiB) is fully granted within about
+  30 s of load; after that about 67 allocations/s (0.13 %, about 1 request in
+  18) fall back to jemalloc. The throughput figure is SAMM with that spillover.
+- SAMM's CPU per request against glibc: about -15 % at 200 VUs, -10 % at 300,
+  -3 % at saturation. glibc keeps freed memory (10 faults/request) and gets
+  most of the reuse SAMM gives, at the price of peak memory (982 MB, OOM in
+  the reverse run).
+- The "80 %" and "95 %" own-capacity rates are fractions of the calibration
+  capacities; against the throughput runs glibc ran at 76 %, SAMM 78.5 %,
+  jemalloc 79.7 %.
+
+**Re-run at `LOAD_K=2.0`** (decided 2026-11-15): calibration first (holds 25 %
+longer, so the knees and OOM points may move), then throughput, the reverse
+replicate, the polled SAMM run, the shared sweep and the warmed own-capacity
+sweep, as above. Pass `LOAD_K=2.0` explicitly; `run.sh` still defaults to 2.5.
 
 ## Phase 9: external validation, the main study (about 2 days of machine time)
 
