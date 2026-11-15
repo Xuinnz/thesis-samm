@@ -539,7 +539,14 @@ Three protections added on 2026-11-15, all before any main-study data:
   slow stretch hit both conditions alike; the probe says when one happened.
 - **Each result records more:** the buffer mode asked for and SAMM's count of
   shared Buffers (the allocator's own evidence of the mode it ran in), whether
-  telemetry was on, the git commit, and the hypervisor's steal time.
+  telemetry was on, the git commit, the hypervisor's steal time, and a hash of
+  the image's layer digests. The **image ID is not an identity**: under
+  Docker's containerd image store it changes on every build even when nothing
+  was rebuilt (ten runs, ten IDs in the buffer-mode comparison), so the "image
+  ID" frozen in Phase 6 identifies one build, not the image's content. What is
+  held fixed across a campaign is the table's hash and the hash of the
+  measured system's source (the campaign lock); the layer digests show
+  whether the image was rebuilt from scratch part-way.
 
 If a command prints `REFUSED`, read the reason; do not work around it. The
 overrides that exist (`CAMPAIGN_ALLOW_CHANGE=1`, `--allow-integrity-errors`)

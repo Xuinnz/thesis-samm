@@ -94,8 +94,9 @@ def campaign_order(base_runs, treat_runs, names, suspects, out):
                 ax.scatter(out_of_test, [ax.get_ylim()[0]] * len(out_of_test), s=34, color=color, marker="x",
                            linewidths=1.4, zorder=3, clip_on=False)
         ax.set_title(f"{name}, {unit}", fontsize=10.5, color=INK, loc="left")
-    axes[0].legend(loc="upper right", ncols=2, frameon=False, fontsize=9, labelcolor=INK, handletextpad=0.3,
-                   bbox_to_anchor=(1.0, 1.22))
+    if axes[0].get_legend_handles_labels()[0]:
+        axes[0].legend(loc="upper right", ncols=2, frameon=False, fontsize=9, labelcolor=INK, handletextpad=0.3,
+                       bbox_to_anchor=(1.0, 1.22))
     axes[-1].set_xlabel("Replicate, in the order the campaign ran them", fontsize=9.5, color=INK_2)
     axes[-1].set_xlim(0.5, last + 0.5)
     note = "Crosses at the bottom edge: runs that were killed or timing-suspect, left out of the tests."

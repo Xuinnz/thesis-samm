@@ -52,7 +52,8 @@ def campaign(folder, n, rng=None, planned=None, health=None, effect=0.0, slow=()
                    "latency_p99_ms": 2200.0, "throughput_rps": rps, "requests": int(rps * 600), "failed_rate": 0.0,
                    "window_secs": 690, "cpu_utilisation_pct": 90.0, "oom_kills": 0, "timing_suspect": False,
                    "page_faults_per_request": 10.0, "dropped_iterations": 0, "max_rps": 1000.0, "mem_limit_mb": 1024.0,
-                   "schedule_seed": BASE_SEED + i, "image_id": "sha256:" + cond, "routing_table_sha256": TABLE,
+                   "schedule_seed": BASE_SEED + i, "image_id": f"sha256:{cond}{i}", "image_layers_sha256": "L" + cond,
+                   "routing_table_sha256": TABLE,
                    "run_order": " ".join(order), "order_position": order.index(cond) + 1, "cpuset_cpus": "1",
                    "k6_taskset": "2,3", "traffic_batch": "all days", "telemetry_enabled": False,
                    "samm_buffer_mode_requested": "chunk", "samm_shared_buffers": 900000 if cond == "samm" else None,
@@ -137,10 +138,10 @@ with tempfile.TemporaryDirectory() as d:
 
 with tempfile.TemporaryDirectory() as d:
     campaign(d, 20)
-    edit(d, "r10-samm.json", image_id="sha256:rebuilt", git_dirty_files=2)
+    edit(d, "r10-samm.json", image_layers_sha256="rebuilt", git_dirty_files=2)
     r = errors_of(d)
-    check("I a second image ID and dirty files are warnings, not errors",
-          not r["errors"] and any("image_id" in w for w in r["warnings"]) and any("uncommitted" in w for w in r["warnings"]))
+    check("I an image rebuilt from scratch and dirty files are warnings, not errors",
+          not r["errors"] and any("image_layers" in w for w in r["warnings"]) and any("uncommitted" in w for w in r["warnings"]))
 
 with tempfile.TemporaryDirectory() as d:
     campaign(d, 20)

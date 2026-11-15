@@ -156,11 +156,16 @@ def verify(results_dir, conditions=None, expect_n=None):
     # ---- things that should be constant per condition
     for cond in conditions:
         mine = [r for (_, c), r in runs.items() if c == cond]
-        for field, level in (("routing_table_sha256", errors), ("mem_limit_mb", errors),
-                             ("image_id", warnings), ("git_commit", warnings)):
+        # image_id is not compared: under Docker's containerd image store it
+        # changes on every build. The layer digests are the image's content.
+        for field, level, meaning in (
+                ("routing_table_sha256", errors, ""), ("mem_limit_mb", errors, ""),
+                ("image_layers_sha256", warnings, " (the image was rebuilt from scratch part-way; its source is "
+                                                  "covered by the campaign lock)"),
+                ("git_commit", warnings, " (commits that did not touch the measured system are harmless)")):
             seen = {r.get(field) for r in mine if r.get(field) is not None}
             if len(seen) > 1:
-                level.append(f"{cond}: {len(seen)} different values of {field} across its runs: "
+                level.append(f"{cond}: {len(seen)} different values of {field} across its runs{meaning}: "
                              + ", ".join(sorted(str(s)[:19] for s in seen)))
     steal = [r["host_steal_pct"] for r in runs.values() if r.get("host_steal_pct") is not None]
     if steal:
@@ -171,7 +176,7 @@ def verify(results_dir, conditions=None, expect_n=None):
     if has_log:
         if failed:
             warnings.append(f"{len(failed)} host probe attempt(s) failed "
-                            f"({', '.join(sorted({'before r' + f['before_replicate'] for f in failed}))}); "
+                            f"({', '.join(sorted({'after the last replicate' if f['before_replicate'] == 'end' else 'before r' + f['before_replicate'] for f in failed}))}); "
                             f"host-suspect replicates: {', '.join(f'r{i:02d}' for i in sorted(suspects)) or 'none'}")
         else:
             info.append("every host probe passed")

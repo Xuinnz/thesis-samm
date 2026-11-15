@@ -135,8 +135,13 @@ run_condition() {
     log "Building image ($dockerfile)..."
     docker build -q -f "$REPO_ROOT/$dockerfile" -t "$image" "$REPO_ROOT" >/dev/null
 
-    local image_id started_at
+    # The image ID changes on every build under Docker's containerd image store
+    # (it covers the build's own record, timestamps included), even when nothing
+    # was rebuilt. The list of layer digests is the image's content: that is
+    # what stays the same across a campaign, and what verify_campaign.py compares.
+    local image_id image_layers started_at
     image_id=$(docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || echo unknown)
+    image_layers=$(docker image inspect -f '{{json .RootFS.Layers}}' "$image" 2>/dev/null | sha256sum | cut -d' ' -f1)
     started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
     log "Starting container (mem=$MEM_LIMIT swap=$MEMSWAP_LIMIT cpus=$CPUS${CPUSET_CPUS:+ on core(s) $CPUSET_CPUS})..."
@@ -389,7 +394,7 @@ run_condition() {
     # Fold k6's metrics and the container metrics into one result file. The
     # BENCH_* values are provenance: what ran, on which seed, in which slot of
     # the replicate's order (set by run_replicates.sh), under which table.
-    BENCH_SEED="$SCHEDULE_SEED" BENCH_IMAGE_ID="$image_id" BENCH_STARTED_AT="$started_at" \
+    BENCH_SEED="$SCHEDULE_SEED" BENCH_IMAGE_ID="$image_id" BENCH_IMAGE_LAYERS="$image_layers" BENCH_STARTED_AT="$started_at" \
     BENCH_TABLE_SHA256="$(sha256sum "$REPO_ROOT/zig-allocator/src/routing-table/model_weights.zig" | cut -d' ' -f1)" \
     BENCH_ORDER="${RUN_ORDER:-}" BENCH_ORDER_POSITION="${RUN_ORDER_POSITION:-}" \
     BENCH_CPUSET="$CPUSET_CPUS" BENCH_K6_TASKSET="$K6_TASKSET" BENCH_TRAFFIC_BATCH="$TRAFFIC_BATCH" \
@@ -514,6 +519,7 @@ result = {
     "dropped_iterations": int(g("dropped_iterations", "count")),
     "schedule_seed": int(os.environ["BENCH_SEED"]) if os.environ.get("BENCH_SEED", "").isdigit() else None,
     "image_id": os.environ.get("BENCH_IMAGE_ID") or None,
+    "image_layers_sha256": os.environ.get("BENCH_IMAGE_LAYERS") or None,
     "routing_table_sha256": os.environ.get("BENCH_TABLE_SHA256") or None,
     "started_at": os.environ.get("BENCH_STARTED_AT") or None,
     "run_order": os.environ.get("BENCH_ORDER") or None,
