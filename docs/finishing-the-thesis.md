@@ -224,6 +224,17 @@ rebuilt per run (same source, same layers); the VM slowed once by up to 18 %
 within a boot on 2026-11-15, which is why the probe now runs inside the
 campaign.
 
+One more, found on 2026-11-15 while testing beyond the thesis's workload: a
+managed Buffer must not be handed to an asynchronous native operation that can
+outlive its request (a file read, a compression or a random fill still queued
+when the client disconnects). The arena reclaims at request end regardless,
+and the operation then reads or writes memory that belongs to a later
+request, without any error. None of the thesis server's routes passes a Buffer
+to `fs`, `zlib` or `crypto` (checked), so no measured result is affected; it
+is a limit on where request-end reclamation can be used as it stands, and
+belongs with the limitation already stated about a call site the first layer
+labels wrongly.
+
 ## 8. Stop and ask the user when
 
 - an integrity error is anything other than an unfinished campaign;
