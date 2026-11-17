@@ -670,9 +670,14 @@ run, "-8 %, opposite sign"); regenerated locally with the fixed script
 
 GC pause differs by -40.5 s per run against -108.6 s of CPU: 37 % of the CPU
 difference, same sign (September, k = 1.0: about 5 %). Main-study r02 jemalloc
-was killed, so the CPU is not from the same seed. The reading of this
-(between the guide's "small share" and "over half") is for the user to decide
-before it is written up.
+was killed, so the CPU is not from the same seed.
+
+**Decided by the user 2026-11-17, the wording for Chapter 4:** GC accounts for
+about a third of SAMM's CPU saving, through 14 % fewer major collections, an
+effect of where Buffers live; the rest is outside GC. Stated with its caveats:
+one replicate with both conditions instrumented, CPU from the main study's
+completed runs rather than the same seed, and the observer perturbs the runs.
+No further GC replicates.
 
 ## Phase 10: the panel's extra results (about 27 h of machine time at n = 15)
 
