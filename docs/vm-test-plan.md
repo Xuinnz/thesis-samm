@@ -622,6 +622,36 @@ they pass 10 % of its runs, survival is the principal result (rule of
 campaign lock: system `be95c55e9d5d`, table `b2318961ebee`). At 14.2 minutes a
 run and eleven probes it should end near 2026-11-17 12:30 UTC.
 
+**Result (finished 2026-11-17 12:28 UTC, exit 0).** Integrity ok: 200 runs,
+every one of the twelve host probes passed, hypervisor steal 0 %, no run
+timing-suspect. Copied to `vm-results/main-study/`; the report is
+`stats/report.txt`.
+
+- **Survival is the principal result:** 16 of 100 jemalloc runs were
+  OOM-killed (r01-r04, r08, r28, r39, r41, r51, r62, r71, r78, r84, r89, r90,
+  r97), none of SAMM's (Fisher p < .001, supplementary). Full-window
+  throughput, every run counted: 756.4 against 792.6 req/s.
+- **The three tests** (84 jemalloc runs, 100 SAMM; Mann-Whitney chosen for all
+  three; α = 0.0167), all rejected: peak memory 843.6 ± 53.8 against
+  890.7 ± 36.8 MiB (+5.6 %, against SAMM: the pool it reserves); processing p99
+  184.6 ± 91.3 against 29.6 ± 14.0 ms (-84.0 %); throughput 768.7 ± 15.0
+  against 784.0 ± 32.7 req/s (+2.0 %). jemalloc's completing runs are its
+  lighter seeds; the paired supplement (84 seeds where both completed) agrees:
+  +36.9 MiB, -159 ms.
+- **Supporting, descriptive:** CPU 67.6 % against 54.7 % of the core; page
+  faults per request 82.5 against 3.4; dropped iterations per run 3,422
+  against 294.
+- **Why throughput differs by only 2 %:** the throughput is the offered load.
+  SAMM dropped a median 0.00 % of the requests offered (max 0.69 %), jemalloc
+  0.28 % (max 6.29 %): at k = 2.0 most minutes are below both capacities and
+  only jemalloc falls short at the peaks (Phase 5). The capacity gap is
+  Phase 8's; here the efficiency gap shows in CPU.
+- `stats/figures/campaign_order.png` from the VM joins points in text order
+  (r10, r100, r11); regenerate it locally with the fixed script (commit
+  99164fb): `venv/bin/python3 stats-eval/hypothesis-testing/main_study_figures.py vm-results/main-study`.
+
+**GC pass launched 2026-11-17 13:25 UTC** (`infra/vm.sh study gc`).
+
 ## Phase 10: the panel's extra results (about 27 h of machine time at n = 15)
 
 Run after the main study. Every variant retrains the table, so **each one gets
