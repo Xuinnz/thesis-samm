@@ -652,6 +652,28 @@ timing-suspect. Copied to `vm-results/main-study/`; the report is
 
 **GC pass launched 2026-11-17 13:25 UTC** (`infra/vm.sh study gc`).
 
+**GC pass result (finished 14:59 UTC, exit 0).** Copied to
+`vm-results/main-study-gc/`. The probe before replicate 1 passed; the one
+after the last replicate failed on page writes (0.90x, at the limit). jemalloc
+was OOM-killed in r01 and r03 (as in the main study, where r01-r03 jemalloc
+were all killed), so only r02 has GC telemetry for both conditions. The
+`gc_summary.md` written on the VM is wrong (baseline CPU 0.0 s from a killed
+run, "-8 %, opposite sign"); regenerated locally with the fixed script
+(commit 83a3130):
+
+| r02, GC observer on | jemalloc | SAMM |
+| :--- | ---: | ---: |
+| Major GC cycles | 19,682 | 16,848 (-14 %) |
+| Minor GCs | 33,763 | 28,053 |
+| Total GC pause, s | 243.8 | 203.4 |
+| CPU time, main study's completed runs (n = 84 / 100), s | 572.6 | 463.9 |
+
+GC pause differs by -40.5 s per run against -108.6 s of CPU: 37 % of the CPU
+difference, same sign (September, k = 1.0: about 5 %). Main-study r02 jemalloc
+was killed, so the CPU is not from the same seed. The reading of this
+(between the guide's "small share" and "over half") is for the user to decide
+before it is written up.
+
 ## Phase 10: the panel's extra results (about 27 h of machine time at n = 15)
 
 Run after the main study. Every variant retrains the table, so **each one gets
