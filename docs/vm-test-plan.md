@@ -788,6 +788,38 @@ quietest state still runs at 75 % of its busiest, and the load generator maps
 each batch's busiest state to `MAX_RPS`, so a batch's absolute level never
 reaches the server. Surge against off-peak is what the load levels (k) show.
 
+**(c) 2 GB at a load that saturates both** (about 9 h; added 2026-11-17, before
+any 2 GB result existed). The 1 GiB study could not apply Phase 5's rule (the
+lowest k whose peak covers both capacities): at k = 2.5 the baseline died in
+every pilot run, so it stepped down to 2.0, where SAMM never reaches its
+ceiling and the throughput gap is only the baseline's shortfall at peaks. In a
+2 GB container memory need not bind, so the rule can be applied there. (a)'s
+2 GB run stays as it is: it changes only the limit, which is what answers the
+panel's question. This one is reported beside it, as each allocator's ceiling
+when memory does not bind; it complements Phase 8 (saturation at 1 GiB, where
+SAMM was limited by memory, not CPU).
+
+```bash
+infra/vm.sh study extra-sat 2048m        # after extra-mem 2048m
+```
+
+On branch `extras/mem-2048m-sat`, made from (a)'s 2 GB table:
+
+1. Host probe, then both capacities at 2 GB, closed loop (`internal-validation/run.sh
+   calibrate jemalloc samm`, `MEM_LIMIT=2048m`, k = 2.5 holds as in Phase 5,
+   VUs 100-800).
+2. **The k, decided by the user 2026-11-17 before any data:** 2.5 (1,250 req/s)
+   if it covers both capacities, else 3.0 (1,500 req/s), and no higher. If
+   SAMM never reaches 98 % CPU in the sweep and its capacity is under 1,250,
+   that is only a lower bound and the script stops to ask. The choice is
+   written to `extras-state/sat2048m/k.txt` and never revisited.
+3. β pass at that k. If it gives the β the 2 GB table already has (likely 1.0,
+   the cap), the table stands and the pass is its own confirmation; otherwise
+   recompile, confirm once, commit, as in (a).
+4. 15 replicates, same seeds as the other extras, into
+   `replicates-k<k>-mem2048m`. Baseline kills there are results, as everywhere:
+   there is no step-down.
+
 ## Phase 11: statistics and reporting
 
 Every `study.sh` run ends with its own statistics, so nothing has to be

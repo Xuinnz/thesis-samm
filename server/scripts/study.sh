@@ -12,6 +12,9 @@
 #   study.sh extra-mem 2048m      Phase 10a: retrain for a 2 GB container, beta, 15 replicates (about 8 h)
 #   study.sh extra-mem 4096m      the same for 4 GB
 #   study.sh extra-weeks          Phase 10b: train on days 1-7, test on days 1-7 and 8-14 (about 14 h)
+#   study.sh extra-sat 2048m      Phase 10c: the 2 GB table at a load that saturates both (about 9 h;
+#                                 after extra-mem 2048m): capacities at 2 GB, k = 2.5 or 3.0 by
+#                                 rule, beta at that k, 15 replicates
 #   study.sh stats                Phase 11: integrity, statistics, figures for everything that exists
 #   study.sh status               what has been run so far
 #
@@ -43,7 +46,9 @@ export CPUSET_CPUS K6_TASKSET PROBE_CPU PROBE_REFERENCE K6_STARTUP_LIMIT_S PROBE
 # Left over in a shell, any of these would quietly change what is measured.
 unset MEM_LIMIT TRAFFIC_BATCH SAMM_TELEMETRY SAMM_SEGMENT_REUSE SAMM_BETA_UTILIZATION SAMM_CONTAINER_BYTES \
       ROTATE VARY_SEED CONDITIONS SCHEDULE_SEED RESULTS_DIR K N DRY_RUN SUMMARY_ONLY CAMPAIGN_ALLOW_CHANGE \
-      POLL_SAMM_STATS SAMM_ALLOW_CONTAINER_MISMATCH 2>/dev/null || true
+      POLL_SAMM_STATS SAMM_ALLOW_CONTAINER_MISMATCH EXTRA_K 2>/dev/null || true
+# EXTRA_K: the load point of an extra that runs at its own k (extra-sat only;
+# set by that command, never from the environment). Everything else: STUDY_K.
 # STUDY_MINUTES shortens every run. It exists for rehearsing this script on a
 # laptop; a folder made with it is locked to it and cannot be mixed with real runs.
 [ -n "${STUDY_MINUTES:-}" ] && export SIMULATION_MINUTES="$STUDY_MINUTES" || unset SIMULATION_MINUTES
@@ -89,7 +94,7 @@ preflight() {
   [ "${CPUSET_CPUS##*[,-]}" -lt "$cores" ] && [ "${K6_TASKSET##*[,-]}" -lt "$cores" ] \
     || note "pinning (server $CPUSET_CPUS, k6 $K6_TASKSET) does not fit this machine's $cores cores"
   echo "  branch $branch at $(git rev-parse --short HEAD); table $(sha256sum zig-allocator/src/routing-table/model_weights.zig | cut -c1-12);" \
-       "k = $STUDY_K; buffer mode $SAMM_BUFFER_MODE; server on core $CPUSET_CPUS, k6 on $K6_TASKSET; probe every $PROBE_EVERY replicates"
+       "k = ${EXTRA_K:-$STUDY_K}; buffer mode $SAMM_BUFFER_MODE; server on core $CPUSET_CPUS, k6 on $K6_TASKSET; probe every $PROBE_EVERY replicates"
   [ "$problems" -eq 0 ] || fail "$problems problem(s) above. Nothing was run."
   echo "  ok"
 }
@@ -109,7 +114,7 @@ check_main_table() {
 campaign() {
   local dir="$1" n="$2" seed="$3"; shift 3
   say "Runs: $(basename "$dir") (n = $n, seeds $((seed + 1))..$((seed + n)))"
-  env "$@" K="$STUDY_K" N="$n" CONDITIONS="$CONDS" SCHEDULE_SEED="$seed" RESULTS_DIR="$dir" REQUIRE_CLEAN=1 \
+  env "$@" K="${EXTRA_K:-$STUDY_K}" N="$n" CONDITIONS="$CONDS" SCHEDULE_SEED="$seed" RESULTS_DIR="$dir" REQUIRE_CLEAN=1 \
     "$SCRIPT_DIR/run_replicates.sh"
   analyse "$dir" "$n" || exit 1
 }
@@ -129,7 +134,7 @@ analyse() {
 beta_pass() {
   local dir="$1"; shift
   if [ ! -f "$dir/r01-samm.json" ]; then
-    env "$@" K="$STUDY_K" N=1 CONDITIONS=samm POLL_SAMM_STATS=1 SCHEDULE_SEED="$BETA_SEED" RESULTS_DIR="$dir" \
+    env "$@" K="${EXTRA_K:-$STUDY_K}" N=1 CONDITIONS=samm POLL_SAMM_STATS=1 SCHEDULE_SEED="$BETA_SEED" RESULTS_DIR="$dir" \
       "$SCRIPT_DIR/run_replicates.sh" >&2
   fi
   "$PY" - "$dir/r01-samm.json" >&2 <<'PY' || fail "the beta pass in $dir did not survive: its memory is not a sound basis for beta."
@@ -195,6 +200,109 @@ extra_table() {
   echo "  committed on $branch: $(git log -1 --format='%h %s')"
 }
 
+# sat_extra <limit>: the extra-mem table for <limit>, at the lowest load whose
+# peak rate covers both capacities measured in that container (Phase 5's rule,
+# which the 1 GiB study had to step down from because the baseline died).
+# Decided by the user 2026-11-17: k = 2.5 if that covers both, else 3.0, and
+# no higher. Each step leaves a file in extras-state/sat<limit>/ and is skipped
+# on a resume, so the k, once chosen, never changes.
+SAT_CAL_VUS="100,200,300,400,500,600,700,800"
+sat_extra() {
+  local limit="$1" label="sat$1" base="extras/mem-$1" branch="extras/mem-$1-sat"
+  local state="$RESULTS/extras-state/sat$1" current beta beta2 json old
+  [ -f "$RESULTS/extras-state/mem$limit/table.committed" ] \
+    || fail "the $limit table is not committed yet: run study.sh extra-mem $limit first (this extra starts from its table)."
+  mkdir -p "$state"
+  git config user.name >/dev/null && git config user.email >/dev/null \
+    || fail "git has no user.name / user.email on this machine. Set them, then run this again."
+  current=$(git rev-parse --abbrev-ref HEAD)
+  if [ "$current" = "main" ]; then
+    check_main_table
+    if git show-ref --verify --quiet "refs/heads/$branch"; then git switch "$branch"; else git switch -c "$branch" "$base"; fi
+  elif [ "$current" != "$branch" ]; then
+    fail "on branch '$current'. Start this from main (or from $branch, to resume)."
+  fi
+
+  # 1. Both capacities in this container, closed loop (Phase 5 step 1, with k = 2.5 holds as there).
+  if [ ! -f "$state/k.txt" ]; then
+    if [ ! -f "$state/calibrate/calibration_knees.csv" ]; then
+      say "$label: capacities at $limit (host probe, then closed loop, VUs $SAT_CAL_VUS; about 30 min)"
+      rm -rf "$state/calibrate"     # a sweep cut off part-way is started again
+      # A slow host would understate the capacities and so the k: probe first,
+      # with the campaigns' limits, and stop rather than calibrate on a bad host.
+      "$REPO_ROOT/internal-validation/host-probe.sh" "$state/probe-$(date -u +%Y%m%dT%H%M%S)" full \
+        || fail "the host probe before the calibration failed. Wait a few hours and run this again (it resumes here)."
+      MEM_LIMIT="$limit" LOAD_K=2.5 CAL_VUS="$SAT_CAL_VUS" RESULTS_DIR="$state/calibrate" \
+        "$REPO_ROOT/internal-validation/run.sh" calibrate jemalloc samm
+      "$PY" "$REPO_ROOT/internal-validation/analysis/calibration_report.py" "$state/calibrate" --no-plot \
+        || fail "the calibration report did not run for $state/calibrate."
+    fi
+    "$PY" - "$state/calibrate/calibration_knees.csv" "$state" <<'PY' || exit 1
+import csv, math, sys
+rows = {r["config"]: r for r in csv.DictReader(open(sys.argv[1]))}
+caps = {}
+for cfg in ("jemalloc", "SAMM"):
+    if cfg not in rows:
+        sys.exit(f"REFUSED: no calibration row for {cfg}")
+    caps[cfg] = float(rows[cfg]["capacity req/s"] or "nan")
+    if math.isnan(caps[cfg]):
+        sys.exit(f"REFUSED: {cfg} has no valid calibration step, so its capacity is unknown. Ask the user.")
+need = max(caps.values())
+samm_sat = rows["SAMM"]["saturated"] == "yes"
+# MAX_RPS = 500 x k
+if need <= 1250:
+    if not samm_sat:
+        sys.exit(f"REFUSED: SAMM never reached 98 % CPU in the sweep, so {caps['SAMM']:.0f} req/s is only a lower "
+                 "bound and cannot decide between k = 2.5 and 3.0. Ask the user.")
+    k, why = "2.5", f"the peak rate 1,250 req/s covers both capacities"
+else:
+    k, why = "3.0", f"1,250 req/s does not cover {need:.0f}; 1,500 is the next level"
+    if need > 1500:
+        why += f" (it does not cover {need:.0f} either: 3.0 is the highest the user allowed)"
+line = f"jemalloc {caps['jemalloc']:.1f} req/s, SAMM {caps['SAMM']:.1f} req/s (SAMM saturated: {'yes' if samm_sat else 'no'})"
+open(sys.argv[2] + "/capacities.txt", "w").write(line + "\n")
+open(sys.argv[2] + "/k.txt", "w").write(k + "\n")
+print(f"  capacities: {line}\n  k = {k}: {why}")
+PY
+  fi
+  EXTRA_K=$(cat "$state/k.txt")
+  echo "  load point: k = $EXTRA_K ($(cat "$state/capacities.txt"))"
+
+  # 2. beta at that k, on the extra-mem table. If it asks for the beta already
+  #    applied (at 2 GB, likely 1.0, the cap), the table stands and the pass
+  #    is its own confirmation (the run gave at least that beta on that table).
+  old=$(cat "$RESULTS/extras-state/mem$limit/beta.txt")
+  if [ ! -f "$state/beta.txt" ]; then
+    say "$label: beta pass 1 at k = $EXTRA_K"
+    json=$(beta_pass "$RESULTS/beta-$label-pass1" MEM_LIMIT="$limit")
+    beta=$("$PY" -c "import json,sys; b=json.loads(sys.argv[1])['beta_to_apply']; print('' if b is None else b)" "$json")
+    [ -n "$beta" ] || fail "pass 1 gives a beta of zero or less: the pool cannot be sized from this run."
+    if "$PY" -c "import sys; sys.exit(0 if abs(float(sys.argv[1]) - float(sys.argv[2])) < 1e-9 else 1)" "$beta" "$old"; then
+      echo "  beta = $beta, the one the $limit table already has: no recompile."
+      touch "$state/same-table"
+    else
+      say "$label: recompile with beta = $beta (the $limit table has $old)"
+      SAMM_BETA_UTILIZATION="$beta" bash "$REPO_ROOT/ml-refinery/run_ml_refinery.sh"
+      (cd "$REPO_ROOT/zig-allocator" && zig build test --summary all)
+    fi
+    echo "$beta" > "$state/beta.txt"
+  fi
+  beta=$(cat "$state/beta.txt")
+  if [ ! -f "$state/table.committed" ]; then
+    if [ ! -f "$state/same-table" ]; then
+      say "$label: beta pass 2 (confirm beta = $beta)"
+      json=$(beta_pass "$RESULTS/beta-$label-pass2" MEM_LIMIT="$limit")
+      beta2=$("$PY" -c "import json,sys; print(json.loads(sys.argv[1])['beta'])" "$json")
+      "$PY" -c "import sys; sys.exit(0 if float(sys.argv[1]) >= float(sys.argv[2]) else 1)" "$beta2" "$beta" \
+        || fail "the confirming run gives beta = $beta2, below the $beta applied. The method iterates once; ask the user."
+      git commit -qam "data(vm): routing table for a $limit container at k = $EXTRA_K" \
+        -m "beta = $beta (pass 1), confirmed by pass 2 ($beta2). Made by server/scripts/study.sh."
+      echo "  committed on $branch: $(git log -1 --format='%h %s')"
+    fi
+    touch "$state/table.committed"
+  fi
+}
+
 # building <branch> <label>: "dirty-ok" while that extra's table is being built on its branch.
 building() {
   [ "$(git rev-parse --abbrev-ref HEAD)" = "$1" ] && [ ! -f "$RESULTS/extras-state/$2/table.committed" ] && echo dirty-ok || true
@@ -211,7 +319,7 @@ back_to_main() {
 # One study.sh at a time on a machine. infra/vm.sh tests this lock before it
 # starts another, and before it pulls.
 case "${1:-}" in
-  pilot|main|gc|extra-mem|extra-weeks)
+  pilot|main|gc|extra-mem|extra-weeks|extra-sat)
     mkdir -p "$REPO_ROOT/results"
     exec 9> "$REPO_ROOT/results/.study.lock"
     flock -n 9 || fail "another study.sh is running on this machine." ;;
@@ -253,9 +361,18 @@ case "${1:-}" in
     campaign "$RESULTS/replicates-k$STUDY_K-d08-d14" "$EXTRA_N" "$EXTRA_SEED" TRAFFIC_BATCH=d08-d14
     back_to_main ;;
 
+  extra-sat)
+    limit="${2:-}"
+    case "$limit" in 2048m|4096m) ;; *) fail "usage: study.sh extra-sat 2048m | 4096m" ;; esac
+    preflight any "$(building "extras/mem-$limit-sat" "sat$limit")"
+    command -v zig >/dev/null 2>&1 || fail "zig is not installed (the table may be recompiled here)"
+    sat_extra "$limit"
+    campaign "$RESULTS/replicates-k$EXTRA_K-mem$limit" "$EXTRA_N" "$EXTRA_SEED" MEM_LIMIT="$limit"
+    back_to_main ;;
+
   stats)
     [ -x "$PY" ] || fail "no venv/bin/python3"
-    for dir in "$RESULTS/main-study-pilot" "$MAIN_DIR" "$RESULTS"/replicates-k"$STUDY_K"-mem* "$RESULTS"/replicates-k"$STUDY_K"-d0*; do
+    for dir in "$RESULTS/main-study-pilot" "$MAIN_DIR" "$RESULTS"/replicates-k*-mem* "$RESULTS"/replicates-k"$STUDY_K"-d0*; do
       [ -f "$dir/campaign.json" ] || continue
       analyse "$dir" || true
     done
@@ -264,12 +381,12 @@ case "${1:-}" in
 
   status)
     echo "branch $(git rev-parse --abbrev-ref HEAD) at $(git rev-parse --short HEAD)"
-    for dir in "$RESULTS"/main-study* "$RESULTS"/replicates-k"$STUDY_K"-* "$RESULTS"/beta-*; do
+    for dir in "$RESULTS"/main-study* "$RESULTS"/replicates-k* "$RESULTS"/beta-*; do
       [ -d "$dir" ] || continue
       done_runs=$(find "$dir" -maxdepth 1 -name 'r[0-9]*-*.json' ! -name '*-k6.json' ! -name '*-allocator.json' ! -name '*-telemetry.json' | wc -l)
       planned=$([ -f "$dir/campaign.json" ] && "$PY" -c "import json,sys; c=json.load(open(sys.argv[1])); print(c['starts'][-1]['n_planned'] * len(c['locked']['conditions'].split()))" "$dir/campaign.json" || echo "?")
       printf '  %-34s %4s of %-4s runs%s\n' "$(basename "$dir")" "$done_runs" "$planned" "$([ -f "$dir/stats/report.txt" ] && echo ', statistics written')"
     done ;;
 
-  *) sed -n '3,18p' "$0"; exit 2 ;;
+  *) sed -n '3,21p' "$0"; exit 2 ;;
 esac

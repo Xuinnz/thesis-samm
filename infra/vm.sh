@@ -11,7 +11,7 @@
 #   infra/vm.sh update     git pull on the VM (refuses while anything is running there)
 #   infra/vm.sh study CMD  start server/scripts/study.sh CMD on the VM, detached; the VM
 #                          powers off when it ends (CMD: pilot, main, gc, extra-mem 2048m,
-#                          extra-mem 4096m, extra-weeks). Prints the first lines of its log.
+#                          extra-mem 4096m, extra-weeks, extra-sat 2048m). Prints the first lines of its log.
 #   infra/vm.sh wait       block until the VM is off (at most WAIT_MINUTES, default 25)
 #   infra/vm.sh delete     delete the VM AND ITS DISK (asks first)
 #
@@ -63,7 +63,8 @@ case "${1:-}" in
       main)        deadman=3600 ;;
       extra-mem)   deadman=900 ;;
       extra-weeks) deadman=1500 ;;
-      *) echo "usage: infra/vm.sh study <pilot | main | gc | extra-mem 2048m | extra-mem 4096m | extra-weeks>"; exit 2 ;;
+      extra-sat)   deadman=900 ;;
+      *) echo "usage: infra/vm.sh study <pilot | main | gc | extra-mem 2048m | extra-mem 4096m | extra-weeks | extra-sat 2048m>"; exit 2 ;;
     esac
     log="results/study-$(echo "$*" | tr ' ' '-')-$(date -u +%Y%m%d-%H%M).log"
     # The shutdown timer is a backstop for a hang; then-poweroff.sh powers the

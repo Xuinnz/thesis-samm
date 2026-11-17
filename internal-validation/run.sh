@@ -22,6 +22,8 @@
 #   SEED         request-stream seed, same for every config (default 20250911)
 #   RESULTS_DIR  default internal-validation/results/<experiment>-<timestamp>
 #   HOST_PORT    default 3000
+#   MEM_LIMIT    container memory limit, swap off (default 1024m). SAMM's image
+#                checks it against the limit its table was compiled for.
 #   SKIP_BUILD   1 = reuse the existing images instead of rebuilding them
 #   CPUSET_CPUS  core(s) the server container is pinned to (unset = not pinned)
 #   K6_TASKSET   core(s) k6 is pinned to, e.g. 2,3 (unset = not pinned)
@@ -72,6 +74,7 @@ esac
 LOAD_K="${LOAD_K:-2.5}"
 SEED="${SEED:-20250911}"
 HOST_PORT="${HOST_PORT:-3000}"
+MEM_LIMIT="${MEM_LIMIT:-1024m}"
 RESULTS_DIR="${RESULTS_DIR:-$HERE/results/$EXPERIMENT-$(date +%Y%m%d-%H%M%S)}"
 # Absolute, always: k6 runs from the scenario directory, so a relative path made
 # it fail at once ("could not create the 'csv' output").
@@ -159,7 +162,7 @@ poll_cgroup() {   # poll_cgroup <cgroup dir> <out.tsv>: one line per second unti
   done
 }
 
-log "experiment=$EXPERIMENT configs=${CONFIGS[*]} LOAD_K=$LOAD_K (HOLD_SCALE=$HOLD_SCALE PROCESS_HOLD_MS=$PROCESS_HOLD_MS) SEED=$SEED"
+log "experiment=$EXPERIMENT configs=${CONFIGS[*]} MEM_LIMIT=$MEM_LIMIT LOAD_K=$LOAD_K (HOLD_SCALE=$HOLD_SCALE PROCESS_HOLD_MS=$PROCESS_HOLD_MS) SEED=$SEED"
 log "results -> $RESULTS_DIR"
 
 for CONFIG in "${CONFIGS[@]}"; do
@@ -181,7 +184,7 @@ for CONFIG in "${CONFIGS[@]}"; do
   log "=== $CONFIG: starting $CURRENT ($IMAGE)"
   docker rm -f "$CURRENT" >/dev/null 2>&1
   docker run -d --name "$CURRENT" \
-    --memory=1024m --memory-swap=1024m --memory-swappiness=0 --cpus=1.0 \
+    --memory="$MEM_LIMIT" --memory-swap="$MEM_LIMIT" --memory-swappiness=0 --cpus=1.0 \
     ${CPUSET_CPUS:+--cpuset-cpus="$CPUSET_CPUS"} \
     -p "$HOST_PORT:3000" \
     -e SHADOW_PROFILER_ENABLED=false -e SAMM_TELEMETRY=false \
@@ -246,7 +249,7 @@ json.dump({
     'load_k': '$LOAD_K', 'hold_scale': $HOLD_SCALE, 'process_hold_ms': $PROCESS_HOLD_MS,
     'process_max_bytes': $PROCESS_MAX_BYTES, 'seed': $SEED,
     'samm_workload_mismatch_override': ${#SAMM_MISMATCH[@]} > 0 and '$CONFIG' == 'samm',
-    'container_limits': {'memory': '1024m', 'swap': 'off', 'cpus': 1.0},
+    'container_limits': {'memory': '$MEM_LIMIT', 'swap': 'off', 'cpus': 1.0},
     'pinning': {'server_cpuset': '${CPUSET_CPUS:-}' or None, 'k6_taskset': '${K6_TASKSET:-}' or None},
     'samm_buffer_mode': ('${SAMM_BUFFER_MODE:-}' or 'detach (default)') if '$CONFIG' == 'samm' else None,
     'k6_exit_code': $K6_RC, 'start_wall_ms': $START_WALL, 'end_wall_ms': $END_WALL,

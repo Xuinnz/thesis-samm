@@ -25,7 +25,7 @@ import verify_campaign  # noqa: E402
 
 
 def label(folder, locked):
-    parts = [f"{locked.get('mem_limit', '?')} container"]
+    parts = [f"k = {locked.get('k', '?')}", f"{locked.get('mem_limit', '?')} container"]
     parts.append("traffic: " + locked.get("traffic_batch", "?"))
     return os.path.basename(folder), ", ".join(parts)
 

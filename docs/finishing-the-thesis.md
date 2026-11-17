@@ -19,9 +19,10 @@ the user; do not improvise a rule.
 | 1 | Main study, n = 100 (started 2026-11-15 12:17 UTC) | `infra/vm.sh study main` | about 48 h |
 | 2 | GC pass | `infra/vm.sh study gc` | 1.5 h |
 | 3 | 2 GB extra | `infra/vm.sh study extra-mem 2048m` | 8 h |
-| 4 | 4 GB extra | `infra/vm.sh study extra-mem 4096m` | 8 h |
-| 5 | Two-weeks extra | `infra/vm.sh study extra-weeks` | 15 h |
-| 6 | Write Chapter 4 from the generated tables and figures | | |
+| 4 | 2 GB at a saturating load (added 2026-11-17, runbook Phase 10c) | `infra/vm.sh study extra-sat 2048m` | 9 h |
+| 5 | 4 GB extra | `infra/vm.sh study extra-mem 4096m` | 8 h |
+| 6 | Two-weeks extra | `infra/vm.sh study extra-weeks` | 15 h |
+| 7 | Write Chapter 4 from the generated tables and figures | | |
 
 Around each step:
 
@@ -39,7 +40,7 @@ infra/vm.sh stop                       # unless the next step starts now
 the repository). One step at a time. The statistics, tables and figures are
 written at the end of every run, under `<folder>/stats/`.
 
-Before steps 3 to 5 the VM needs a git name and email (`git config --global
+Before steps 3 to 6 the VM needs a git name and email (`git config --global
 user.name` / `user.email`, the user's): each extra commits its retrained table
 on its own branch. The script refuses without them. Ask the user; do not
 invent an identity.
@@ -190,6 +191,11 @@ finishes. n = 15: the same tests, with much less power.
 | `the beta pass ... did not survive` | SAMM died in a 2 GB or 4 GB container at this load. Unexpected | Stop. Report to the user with the pass's result file. Do not lower β by hand |
 | `the confirming run gives beta = X, below the Y applied` | The pool sized by pass 1 is too large once it is in use | Stop. The method iterates once. Applying X is a second iteration and a stated deviation: the user decides |
 | β printed above 1 and applied as 1.0 | The pool cannot exceed what the container allows. Expected at 2 GB and 4 GB (the rehearsal gave 1.03) | State it in the write-up |
+| `extra-sat`: `the $limit table is not committed yet` | `extra-mem 2048m` has not finished | Run it first |
+| `extra-sat`: `the host probe before the calibration failed` | The host is slow; the capacities, and so the k, would be understated | Wait a few hours and run the same command again |
+| `extra-sat`: `SAMM never reached 98 % CPU in the sweep` | Its capacity is only a lower bound, below 1,250 req/s: the k cannot be decided | Stop and ask the user (a wider sweep is their call) |
+| `extra-sat`: k = 3.0 with "3.0 is the highest the user allowed" | SAMM's capacity at 2 GB is above 1,500 req/s: even 3.0 does not saturate it | Go on. State it: at 3.0 SAMM is still below its ceiling |
+| `extra-sat`: baseline killed in many runs | It needs more than 2 GB at this load | A result, reported as in 4.2. No step-down |
 | The command stopped part-way | The VM is still on the extra's branch | Run the same command again: it continues from the step it reached. Do not `git switch main` by hand while the table is uncommitted |
 | No run killed, and SAMM's peak memory well above the baseline's | Expected: memory is no longer the constraint, and SAMM's ceiling grows with the container while its floors do not | Report memory as the cost; the comparison of interest is now CPU per request, page faults and latency |
 | A test not significant at n = 15 | "Not detected at n = 15." With 15 runs only large effects are detectable | Do not write "no effect", and do not add runs after seeing the p-value |
