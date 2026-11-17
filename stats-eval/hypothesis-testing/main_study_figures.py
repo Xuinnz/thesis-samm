@@ -85,7 +85,7 @@ def campaign_order(base_runs, treat_runs, names, suspects, out):
             ax.axvspan(i - 0.5, i + 0.5, color=GRID, alpha=0.7, linewidth=0, zorder=0)
         for role, runs, label in (("baseline", base_runs, names[0]), ("treatment", treat_runs, names[1])):
             color, marker = SERIES[role]
-            ok = [(int(r["replicate"][1:]), float(r[key])) for r in runs if r["included"] and r.get(key) is not None]
+            ok = sorted((int(r["replicate"][1:]), float(r[key])) for r in runs if r["included"] and r.get(key) is not None)  # by number: the folder lists r10 before r2
             out_of_test = [int(r["replicate"][1:]) for r in runs if not r["included"]]
             if ok:
                 ax.plot(*zip(*ok), color=color, linewidth=0.8, alpha=0.5, zorder=1)
