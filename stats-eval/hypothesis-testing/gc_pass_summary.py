@@ -34,6 +34,11 @@ def load(folder, cond, suffix=""):
     return out
 
 
+def completed(r):
+    """A run that lived to the end with its counters: not killed, CPU measured."""
+    return bool(r) and not r.get("oom_kills") and r.get("died_after_s") is None and bool(r.get("cpu_utilisation_pct"))
+
+
 def mean(vals):
     vals = [v for v in vals if v is not None]
     return st.mean(vals) if vals else float("nan")
@@ -47,29 +52,45 @@ def main():
     ap.add_argument("--treatment", default="samm")
     args = ap.parse_args()
 
-    rows, kinds = {}, []
-    for cond in (args.baseline, args.treatment):
-        tele = {k: v for k, v in load(args.gc_dir, cond, "-telemetry").items() if v.get("enabled")}
-        if not tele:
+    conds = (args.baseline, args.treatment)
+    tele, runs, clean = {}, {}, {}
+    for cond in conds:
+        tele[cond] = {k: v for k, v in load(args.gc_dir, cond, "-telemetry").items() if v.get("enabled")}
+        if not tele[cond]:
             sys.exit(f"no telemetry for {cond} in {args.gc_dir}: was the pass run with study.sh gc?")
-        runs = load(args.gc_dir, cond)
-        clean = load(args.clean, cond) if args.clean and os.path.isdir(args.clean) else {}
-        clean = {k: v for k, v in clean.items() if k in tele}
-        for t in tele.values():
+        runs[cond] = load(args.gc_dir, cond)
+        clean[cond] = load(args.clean, cond) if args.clean and os.path.isdir(args.clean) else {}
+    # Only replicates instrumented in both conditions: a killed run writes no
+    # telemetry, and averaging one condition over more replicates than the
+    # other compares different seeds.
+    common = sorted(set(tele[conds[0]]) & set(tele[conds[1]]))
+    if not common:
+        sys.exit(f"no replicate in {args.gc_dir} has telemetry for both conditions")
+    # CPU from the clean runs of those replicates, where both completed there
+    # (a killed run's CPU counters are gone: its CPU reads 0).
+    paired = [k for k in common if all(completed(clean[c].get(k)) for c in conds)]
+    rows, kinds = {}, []
+    for cond in conds:
+        tl = [tele[cond][k] for k in common]
+        for t in tl:
             for kind in t["gc"].get("byKind", {}):
                 if kind not in kinds:
                     kinds.append(kind)
+        if paired:
+            cpu_runs = [clean[cond][k] for k in paired]
+        else:   # fallback: every completed run of the main study, any replicate
+            cpu_runs = [r for r in clean[cond].values() if completed(r)]
         rows[cond] = {
-            "replicates": " ".join(sorted(tele)),
-            "collections": mean(t["gc"]["count"] for t in tele.values()),
-            "pause_s": mean(t["gc"]["totalPauseMs"] / 1000 for t in tele.values()),
-            "pause_p99_ms": mean(t["gc"].get("p99PauseMs") for t in tele.values()),
-            "by_kind": {k: mean(t["gc"].get("byKind", {}).get(k, {}).get("count", 0) for t in tele.values()) for k in kinds},
-            "heap_peak_mb": mean(t.get("heap", {}).get("peakUsedHeapBytes", 0) / 1048576 for t in tele.values()),
-            "clean_n": len(clean),
-            "clean_cpu_s": mean(r["cpu_utilisation_pct"] / 100 * r["window_secs"] for r in clean.values()),
-            "all_alive": all((r.get("container_end_state") or {}).get("status") in (None, "running", "unknown")
-                             for r in runs.values()),
+            "replicates": " ".join(common),
+            "collections": mean(t["gc"]["count"] for t in tl),
+            "pause_s": mean(t["gc"]["totalPauseMs"] / 1000 for t in tl),
+            "pause_p99_ms": mean(t["gc"].get("p99PauseMs") for t in tl),
+            "by_kind": {k: mean(t["gc"].get("byKind", {}).get(k, {}).get("count", 0) for t in tl) for k in kinds},
+            "heap_peak_mb": mean(t.get("heap", {}).get("peakUsedHeapBytes", 0) / 1048576 for t in tl),
+            "clean_n": len(cpu_runs),
+            "clean_cpu_s": mean(r["cpu_utilisation_pct"] / 100 * r["window_secs"] for r in cpu_runs),
+            "all_alive": all(completed(r) for r in runs[cond].values()),
+            "died": sorted(k for k, r in runs[cond].items() if not completed(r)),
         }
     b, t = rows[args.baseline], rows[args.treatment]
     names = ("Baseline V8 Engine", "SAMM Engine")
@@ -84,16 +105,24 @@ def main():
            f"| Peak JS heap in use, MiB | {b['heap_peak_mb']:.1f} | {t['heap_peak_mb']:.1f} |"]
     if b["clean_n"] and t["clean_n"]:
         d_gc, d_cpu = t["pause_s"] - b["pause_s"], t["clean_cpu_s"] - b["clean_cpu_s"]
-        md += [f"| CPU time in the clean runs of the same replicates, s | {b['clean_cpu_s']:.1f} | {t['clean_cpu_s']:.1f} |", "",
-               f"SAMM's GC pause time differs from the baseline's by {d_gc:+.1f} s per run; its CPU time, in the clean "
-               f"runs, by {d_cpu:+.1f} s."]
+        if paired:
+            where = f"the clean runs of the same replicates ({' '.join(paired)})"
+            label = "CPU time in the clean runs of the same replicates, s"
+        else:
+            where = (f"the main study's completed runs, every replicate (n = {b['clean_n']} and {t['clean_n']}): "
+                     f"no replicate above completed in both conditions there, so this is not the same seeds")
+            label = f"CPU time, main study's completed runs (n = {b['clean_n']} / {t['clean_n']}), s"
+        md += [f"| {label} | {b['clean_cpu_s']:.1f} | {t['clean_cpu_s']:.1f} |", "",
+               f"SAMM's GC pause time differs from the baseline's by {d_gc:+.1f} s per run; its CPU time, in {where}, "
+               f"by {d_cpu:+.1f} s."]
         if d_cpu:
             md.append(f"GC pause time is {100 * d_gc / d_cpu:.0f} % of the CPU difference"
                       + (" and has the opposite sign." if d_gc * d_cpu < 0 else "."))
     else:
         md += ["", "(No clean runs of these replicates yet: run the main study, then `study.sh stats`.)"]
     if not (b["all_alive"] and t["all_alive"]):
-        md += ["", "NOTE: at least one instrumented run's container died; its counts cover only the time it lived."]
+        died = "; ".join(f"{c} {' '.join(rows[c]['died'])}" for c in conds if rows[c]["died"])
+        md += ["", f"NOTE: instrumented runs died ({died}); they wrote no GC telemetry and are left out above."]
     text = "\n".join(md)
     print(text)
     with open(os.path.join(args.gc_dir, "gc_summary.md"), "w") as f:
