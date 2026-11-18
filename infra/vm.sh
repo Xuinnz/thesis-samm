@@ -64,7 +64,8 @@ case "${1:-}" in
       extra-mem)   deadman=900 ;;
       extra-weeks) deadman=1500 ;;
       extra-sat)   deadman=900 ;;
-      *) echo "usage: infra/vm.sh study <pilot | main | gc | extra-mem 2048m | extra-mem 4096m | extra-weeks | extra-sat 2048m>"; exit 2 ;;
+      extra-mem-k) deadman=900 ;;
+      *) echo "usage: infra/vm.sh study <pilot | main | gc | extra-mem 2048m | extra-mem 4096m | extra-mem-k 4096m 3.0 | extra-weeks | extra-sat 2048m>"; exit 2 ;;
     esac
     log="results/study-$(echo "$*" | tr ' ' '-')-$(date -u +%Y%m%d-%H%M).log"
     # The shutdown timer is a backstop for a hang; then-poweroff.sh powers the

@@ -879,6 +879,25 @@ writes, 0.87x; finished 11:41 UTC, exit 0).** Copied to
 - *With the 10 flagged runs included* (diagnosis only): memory −14.3 %, p99
   −77.7 %, throughput +31.4 %, every p < .003. No decision changes.
 
+**(d) 4 GB at k = 3.0** (about 9 h; decided by the user 2026-11-18, before any
+4 GB result). It replaces (a)'s 4 GB run at the main study's load: at 2 GB and
+k = 2.0 memory already did not bind (no kills, peaks near 1 GiB of 2, β capped
+at 1.0), so 4 GB at k = 2.0 would only repeat that. The 4 GB slot is used
+instead to overload both allocators (peak 1,500 req/s, above both capacities
+measured at 2 GB, 807 and 1,136) with memory out of the way. k is fixed at
+3.0, not chosen by (c)'s rule.
+
+```bash
+infra/vm.sh study extra-mem-k 4096m 3.0
+```
+
+As (a) in every other respect, on branch `extras/mem-4096m-k3.0`: retrain in
+a 4 GB container, β pass 1 at k = 3.0, recompile, β pass 2, commit, then 15
+replicates into `replicates-k3.0-mem4096m`. A first launch of (a)'s 4 GB run
+(2026-11-18 13:38 UTC) was stopped by the user's decision while it was still
+retraining; nothing was measured (set aside on the VM as
+`extras-state/STOPPED-mem4096m-k2.0-20261118`).
+
 ## Phase 11: statistics and reporting
 
 Every `study.sh` run ends with its own statistics, so nothing has to be

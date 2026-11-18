@@ -12,6 +12,8 @@
 #   study.sh extra-mem 2048m      Phase 10a: retrain for a 2 GB container, beta, 15 replicates (about 8 h)
 #   study.sh extra-mem 4096m      the same for 4 GB
 #   study.sh extra-weeks          Phase 10b: train on days 1-7, test on days 1-7 and 8-14 (about 14 h)
+#   study.sh extra-mem-k 4096m 3.0  Phase 10d: retrain for a 4 GB container, beta at k = 3.0,
+#                                 15 replicates at k = 3.0 (about 9 h; replaced extra-mem 4096m)
 #   study.sh extra-sat 2048m      Phase 10c: the 2 GB table at a load that saturates both (about 9 h;
 #                                 after extra-mem 2048m): capacities at 2 GB, k = 2.5 or 3.0 by
 #                                 rule, beta at that k, 15 replicates
@@ -47,7 +49,7 @@ export CPUSET_CPUS K6_TASKSET PROBE_CPU PROBE_REFERENCE K6_STARTUP_LIMIT_S PROBE
 unset MEM_LIMIT TRAFFIC_BATCH SAMM_TELEMETRY SAMM_SEGMENT_REUSE SAMM_BETA_UTILIZATION SAMM_CONTAINER_BYTES \
       ROTATE VARY_SEED CONDITIONS SCHEDULE_SEED RESULTS_DIR K N DRY_RUN SUMMARY_ONLY CAMPAIGN_ALLOW_CHANGE \
       POLL_SAMM_STATS SAMM_ALLOW_CONTAINER_MISMATCH EXTRA_K 2>/dev/null || true
-# EXTRA_K: the load point of an extra that runs at its own k (extra-sat only;
+# EXTRA_K: the load point of an extra that runs at its own k (extra-sat, extra-mem-k;
 # set by that command, never from the environment). Everything else: STUDY_K.
 # STUDY_MINUTES shortens every run. It exists for rehearsing this script on a
 # laptop; a folder made with it is locked to it and cannot be mixed with real runs.
@@ -344,7 +346,7 @@ back_to_main() {
 # One study.sh at a time on a machine. infra/vm.sh tests this lock before it
 # starts another, and before it pulls.
 case "${1:-}" in
-  pilot|main|gc|extra-mem|extra-weeks|extra-sat)
+  pilot|main|gc|extra-mem|extra-mem-k|extra-weeks|extra-sat)
     mkdir -p "$REPO_ROOT/results"
     exec 9> "$REPO_ROOT/results/.study.lock"
     flock -n 9 || fail "another study.sh is running on this machine." ;;
@@ -386,6 +388,21 @@ case "${1:-}" in
     campaign "$RESULTS/replicates-k$STUDY_K-d08-d14" "$EXTRA_N" "$EXTRA_SEED" TRAFFIC_BATCH=d08-d14
     back_to_main ;;
 
+  extra-mem-k)
+    # Decided by the user 2026-11-18: the 4 GB extra runs at a fixed k = 3.0
+    # instead of the main study's 2.0 (at 2 GB and k = 2.0 memory already did
+    # not bind, so 4 GB at 2.0 would repeat it). As extra-mem in every other
+    # respect: retrain in that container, beta at that k, 15 replicates.
+    limit="${2:-}" k="${3:-}"
+    case "$limit" in 2048m|4096m) ;; *) fail "usage: study.sh extra-mem-k 2048m|4096m 2.5|3.0" ;; esac
+    case "$k" in 2.5|3.0) ;; *) fail "usage: study.sh extra-mem-k 2048m|4096m 2.5|3.0" ;; esac
+    EXTRA_K="$k"
+    preflight any "$(building "extras/mem-$limit-k$k" "mem$limit-k$k")"
+    command -v zig >/dev/null 2>&1 || fail "zig is not installed (the table is recompiled here)"
+    extra_table "extras/mem-$limit-k$k" "mem$limit-k$k" "data(vm): routing table for a $limit container, beta at k = $k" MEM_LIMIT="$limit"
+    campaign "$RESULTS/replicates-k$k-mem$limit" "$EXTRA_N" "$EXTRA_SEED" MEM_LIMIT="$limit"
+    back_to_main ;;
+
   extra-sat)
     limit="${2:-}"
     case "$limit" in 2048m|4096m) ;; *) fail "usage: study.sh extra-sat 2048m | 4096m" ;; esac
@@ -413,5 +430,5 @@ case "${1:-}" in
       printf '  %-34s %4s of %-4s runs%s\n' "$(basename "$dir")" "$done_runs" "$planned" "$([ -f "$dir/stats/report.txt" ] && echo ', statistics written')"
     done ;;
 
-  *) sed -n '3,21p' "$0"; exit 2 ;;
+  *) sed -n '3,23p' "$0"; exit 2 ;;
 esac

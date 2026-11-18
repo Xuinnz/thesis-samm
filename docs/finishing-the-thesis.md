@@ -20,7 +20,7 @@ the user; do not improvise a rule.
 | 2 | GC pass | `infra/vm.sh study gc` | 1.5 h |
 | 3 | 2 GB extra | `infra/vm.sh study extra-mem 2048m` | 8 h |
 | 4 | 2 GB at a saturating load (added 2026-11-17, runbook Phase 10c) | `infra/vm.sh study extra-sat 2048m` | 9 h |
-| 5 | 4 GB extra | `infra/vm.sh study extra-mem 4096m` | 8 h |
+| 5 | 4 GB at k = 3.0 (replaced the 4 GB run at k = 2.0, user 2026-11-18; runbook Phase 10d) | `infra/vm.sh study extra-mem-k 4096m 3.0` | 9 h |
 | 6 | Two-weeks extra | `infra/vm.sh study extra-weeks` | 15 h |
 | 7 | Write Chapter 4 from the generated tables and figures | | |
 
