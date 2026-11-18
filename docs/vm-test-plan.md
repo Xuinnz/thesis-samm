@@ -841,6 +841,16 @@ On branch `extras/mem-2048m-sat`, made from (a)'s 2 GB table:
    there is no step-down.
 
 **(c) launched 2026-11-18 02:04 UTC** (`infra/vm.sh study extra-sat 2048m`).
+**It stopped at 02:39 UTC with an invalid calibration (exit 1).** The branch
+was made from `extras/mem-2048m`, which predates the `MEM_LIMIT` setting in
+`internal-validation/run.sh`, so the sweep ran in 1 GiB (both `run.json` say
+`1024m`; SAMM was OOM-killed at 400 VUs, jemalloc at 600). The script refused
+(SAMM below 98 % CPU), rightly but for the wrong reason. Set aside on the VM as
+`extras-state/INVALID-sat2048m-calibrated-at-1GiB-20261118`, the branch removed
+(it had no commits of its own). Fixed: the branch now starts from `main` and
+takes only the table's files from `extras/mem-2048m`, and the k step refuses if
+a calibration's recorded limit is not the one asked for. No k was chosen and
+nothing was measured, so the decision rule is untouched.
 
 ## Phase 11: statistics and reporting
 

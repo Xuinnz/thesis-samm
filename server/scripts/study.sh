@@ -218,10 +218,28 @@ sat_extra() {
   current=$(git rev-parse --abbrev-ref HEAD)
   if [ "$current" = "main" ]; then
     check_main_table
-    if git show-ref --verify --quiet "refs/heads/$branch"; then git switch "$branch"; else git switch -c "$branch" "$base"; fi
+    if git show-ref --verify --quiet "refs/heads/$branch"; then
+      git switch "$branch"
+    else
+      # From main, so every script is main's (a branch made from $base would
+      # carry the scripts as they were when $base was made: on 2026-11-18 that
+      # ran the calibration in 1 GiB). Only the table's files come from $base.
+      local files
+      files=$(git diff --name-only "$(git merge-base main "$base")" "$base")
+      [ -n "$files" ] || fail "$base has no table commit to take the files from."
+      git switch -c "$branch"
+      # shellcheck disable=SC2086
+      git checkout "$base" -- $files
+      git commit -qm "data(vm): the $limit table, taken from $base ($(git rev-parse --short "$base"))" \
+        -m "Files: $(echo $files | tr '\n' ' '). Made by server/scripts/study.sh extra-sat."
+      echo "  $branch: main plus the $limit table from $base"
+    fi
   elif [ "$current" != "$branch" ]; then
     fail "on branch '$current'. Start this from main (or from $branch, to resume)."
   fi
+  [ "$(git show "$base:zig-allocator/src/routing-table/model_weights.zig" | sha256sum)" \
+    = "$(sha256sum < zig-allocator/src/routing-table/model_weights.zig)" ] || [ -f "$state/beta.txt" ] \
+    || fail "the table on $branch is not the one on $base."
 
   # 1. Both capacities in this container, closed loop (Phase 5 step 1, with k = 2.5 holds as there).
   if [ ! -f "$state/k.txt" ]; then
@@ -237,8 +255,15 @@ sat_extra() {
       "$PY" "$REPO_ROOT/internal-validation/analysis/calibration_report.py" "$state/calibrate" --no-plot \
         || fail "the calibration report did not run for $state/calibrate."
     fi
-    "$PY" - "$state/calibrate/calibration_knees.csv" "$state" <<'PY' || exit 1
-import csv, math, sys
+    "$PY" - "$state/calibrate/calibration_knees.csv" "$state" "$limit" <<'PY' || exit 1
+import csv, json, math, os, sys
+# The container the sweep actually ran in, as each config's run.json records it.
+for cfg in ("jemalloc", "samm"):
+    run = json.load(open(os.path.join(os.path.dirname(sys.argv[1]), cfg, "run.json")))
+    got = (run.get("container_limits") or {}).get("memory")
+    if got != sys.argv[3]:
+        sys.exit(f"REFUSED: the {cfg} calibration ran with a {got} limit, not {sys.argv[3]}. Its capacities "
+                 f"do not apply. Move {os.path.dirname(sys.argv[1])} aside and find out why.")
 rows = {r["config"]: r for r in csv.DictReader(open(sys.argv[1]))}
 caps = {}
 for cfg in ("jemalloc", "SAMM"):
