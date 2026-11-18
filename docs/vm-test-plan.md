@@ -852,6 +852,33 @@ takes only the table's files from `extras/mem-2048m`, and the k step refuses if
 a calibration's recorded limit is not the one asked for. No k was chosen and
 nothing was measured, so the decision rule is untouched.
 
+**Result (relaunched 02:58 UTC after a host probe failed at 02:50 on page
+writes, 0.87x; finished 11:41 UTC, exit 0).** Copied to
+`vm-results/replicates-k2.5-mem2048m/`, with `sat2048m/` (calibration, k) and
+`beta-sat2048m-pass1/`.
+
+- *Capacities at 2 GB* (both containers recorded 2048m): jemalloc 807.0 req/s
+  (knee 300 VUs), SAMM 1,135.6 req/s (400 VUs, saturated). Neither was killed at
+  any step up to 800 VUs. 1,250 covers both, so **k = 2.5**.
+- *β at k = 2.5:* outside the pool peaked at 136.6 MiB; β = 1.010, so 1.0, the
+  table's own: no recompile, the pass is its confirmation.
+- *The 15 replicates:* integrity ok, every probe passed, steal 0 %, no run
+  killed. **10 runs timing-suspect** (wall window over 1.25x the schedule; the
+  rest sat at 1.23-1.25), excluded by the fixed rule: jemalloc r03-r06 and r14,
+  SAMM r02-r05 and r13. They fall in two stretches, 04:47-07:13 and
+  10:24-11:07 UTC, between the probes (replicates 1 and 11, and the end, all
+  passed): a slow host, as k6 start-up shows it. 10 runs per condition
+  contribute.
+- *Tests* (α = 0.0167), all rejected: peak memory 1,366.1 ± 37.7 against
+  1,096.9 ± 149.0 MiB (−19.7 %, Mann-Whitney p = 0.002, **in SAMM's favour**:
+  at saturation jemalloc's backlog holds more); processing p99 1,586.9 against
+  236.3 ms (−85.1 %, p < .001); throughput 752.3 against 964.7 req/s (+28.2 %,
+  t-test p < .001). Full-window throughput, every run: 724.9 against 953.1.
+  CPU 70.6 % against 64.8 % of the core; page faults per request 100.3
+  against 2.3.
+- *With the 10 flagged runs included* (diagnosis only): memory −14.3 %, p99
+  −77.7 %, throughput +31.4 %, every p < .003. No decision changes.
+
 ## Phase 11: statistics and reporting
 
 Every `study.sh` run ends with its own statistics, so nothing has to be
