@@ -722,6 +722,26 @@ continues from the step it reached (`benchmark-results/extras-state/`).
   container, for both conditions alike.
 - Optional second pass: holds ×2 / ×4 to keep memory pressure proportional.
 
+**(a) 2 GB result (finished 2026-11-18 00:20 UTC, exit 0).** Copied to
+`vm-results/replicates-k2.0-mem2048m/` (and the two β passes). Integrity ok,
+every probe passed, steal 0 %.
+
+*Layer 3 at 2 GB:* pool hard limit 1,860.1 MiB (1 GiB: 833.8). Pass 1 (β =
+0.75, ceiling 1,395.1 MiB): memory outside the pool peaked at 128.0 MiB (1 GiB:
+288.9), so C = 2,048 − 128.0 − 32 = 1,888 MiB and β = 1.015, above 1: applied
+as 1.0, ceiling 1,860.1 MiB (floors 559.9 MiB, 1,300.2 MiB shared). Pass 2 at
+1.0 gave β = 1.014 (outside peak 130.2 MiB): confirmed. Container peak in the
+passes 1,103 and 1,100 MiB of 2,048. Table `dc19d07` on `extras/mem-2048m`.
+
+*The 15 replicates (k = 2.0):* no run killed in either condition. Peak memory
+910.5 ± 148.6 against 996.2 ± 74.3 MiB (+9.4 %, Mann-Whitney p = 0.013,
+rejected, against SAMM); processing p99 246.3 ± 211.7 against 23.9 ± 5.4 ms
+(−90.3 %, p < .001, rejected); throughput 777.9 against 796.8 req/s (+2.4 %,
+p = 0.507, not detected at n = 15). CPU 67.3 % against 52.9 % of the core; page
+faults per request 82.9 against 2.5; dropped iterations per run 11,000 against
+415. Same picture as the 1 GiB study without the kills: memory no longer
+binds, SAMM holds more of it, and the CPU, fault and latency gaps stay.
+
 **(b) Azure days 1-7 against days 8-14** (about 13 h). The table is trained on
 the first week's traffic and tested on both weeks. The two batches are already
 built and committed under `datasets/azure-trace-2019/processed/{d01-d07,d08-d14}`
@@ -819,6 +839,8 @@ On branch `extras/mem-2048m-sat`, made from (a)'s 2 GB table:
 4. 15 replicates, same seeds as the other extras, into
    `replicates-k<k>-mem2048m`. Baseline kills there are results, as everywhere:
    there is no step-down.
+
+**(c) launched 2026-11-18 02:04 UTC** (`infra/vm.sh study extra-sat 2048m`).
 
 ## Phase 11: statistics and reporting
 
