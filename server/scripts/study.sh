@@ -12,8 +12,10 @@
 #   study.sh extra-mem 2048m      Phase 10a: retrain for a 2 GB container, beta, 15 replicates (about 8 h)
 #   study.sh extra-mem 4096m      the same for 4 GB
 #   study.sh extra-weeks          Phase 10b: train on days 1-7, test on days 1-7 and 8-14 (about 14 h)
-#   study.sh extra-mem-k 4096m 3.0  Phase 10d: retrain for a 4 GB container, beta at k = 3.0,
-#                                 15 replicates at k = 3.0 (about 9 h; replaced extra-mem 4096m)
+#   study.sh extra-rate 2048m 1500  Phase 10e: k = 2.0's holds at a 1,500 req/s peak in 2 GB:
+#                                 retrain (profiled at half the rate), beta, 15 replicates (about 9 h)
+#   study.sh extra-rate 4096m 2000  the same at a 2,000 req/s peak in 4 GB
+#   study.sh extra-mem-k 4096m 3.0  Phase 10d (not used: superseded by extra-rate, 2026-11-18)
 #   study.sh extra-sat 2048m      Phase 10c: the 2 GB table at a load that saturates both (about 9 h;
 #                                 after extra-mem 2048m): capacities at 2 GB, k = 2.5 or 3.0 by
 #                                 rule, beta at that k, 15 replicates
@@ -48,7 +50,7 @@ export CPUSET_CPUS K6_TASKSET PROBE_CPU PROBE_REFERENCE K6_STARTUP_LIMIT_S PROBE
 # Left over in a shell, any of these would quietly change what is measured.
 unset MEM_LIMIT TRAFFIC_BATCH SAMM_TELEMETRY SAMM_SEGMENT_REUSE SAMM_BETA_UTILIZATION SAMM_CONTAINER_BYTES \
       ROTATE VARY_SEED CONDITIONS SCHEDULE_SEED RESULTS_DIR K N DRY_RUN SUMMARY_ONLY CAMPAIGN_ALLOW_CHANGE \
-      POLL_SAMM_STATS SAMM_ALLOW_CONTAINER_MISMATCH EXTRA_K 2>/dev/null || true
+      POLL_SAMM_STATS SAMM_ALLOW_CONTAINER_MISMATCH EXTRA_K PEAK_RPS PROFILE_RPS PROFILE_CAPACITY 2>/dev/null || true
 # EXTRA_K: the load point of an extra that runs at its own k (extra-sat, extra-mem-k;
 # set by that command, never from the environment). Everything else: STUDY_K.
 # STUDY_MINUTES shortens every run. It exists for rehearsing this script on a
@@ -152,6 +154,27 @@ PY
   "$PY" "$SCRIPT_DIR/derive_beta.py" "$dir/r01-samm-samm-stats.jsonl" --json
 }
 
+# profile_check <pipeline log>: a profiling run above the usual 500 req/s must
+# have kept up. The profiler is expensive; if k6 had to drop requests, the
+# trace describes a server that fell behind, not the workload, and the table
+# trained on it would be wrong.
+profile_check() {
+  "$PY" - "$1" "$PROFILE_RPS" <<'PY' || exit 1
+import re, sys
+text = open(sys.argv[1], errors="replace").read()
+done = re.findall(r"^\s*iterations\.*:\s*([0-9]+)", text, re.M)
+dropped = re.findall(r"^\s*dropped_iterations\.*:\s*([0-9]+)", text, re.M)
+if not done:
+    sys.exit(f"REFUSED: no k6 summary in {sys.argv[1]}, so the profiling run at {sys.argv[2]} req/s cannot be checked.")
+d, x = int(done[-1]), int(dropped[-1]) if dropped else 0
+share = 100 * x / (d + x)
+print(f"  profiling run at {sys.argv[2]} req/s: {d:,} requests, {x:,} dropped ({share:.2f} %)")
+if share > 1.0:
+    sys.exit(f"REFUSED: the profiling run dropped {share:.2f} % of its requests (over 1 %): the profiled server fell "
+             "behind, so its trace is not a sound basis for the table. Ask the user.")
+PY
+}
+
 # extra_table <branch> <label> <commit message> [NAME=value ...]
 # On its own branch: profile and retrain under the variant's settings, derive
 # beta as in Phase 6 (measure, recompile, confirm), commit the table there.
@@ -176,8 +199,12 @@ extra_table() {
   fi
 
   if [ ! -f "$state/pipeline.done" ]; then
-    say "$label: profile, retrain, compile, test (about 16 min)"
-    env "$@" SKIP_BENCHMARK=1 "$SCRIPT_DIR/run_full_pipeline.sh"
+    say "$label: profile, retrain, compile, test (about 16 min)${PROFILE_RPS:+; profiled at $PROFILE_RPS req/s}"
+    # PROFILE_RPS / PROFILE_CAPACITY: extra-rate only (the profiling load and
+    # the profiler's slots for it); unset, the pipeline's own defaults.
+    env "$@" ${PROFILE_RPS:+MAX_RPS="$PROFILE_RPS"} ${PROFILE_CAPACITY:+SHADOW_PROFILER_CAPACITY="$PROFILE_CAPACITY"} \
+      SKIP_BENCHMARK=1 "$SCRIPT_DIR/run_full_pipeline.sh" 2>&1 | tee "$state/pipeline.log"
+    [ -n "${PROFILE_RPS:-}" ] && profile_check "$state/pipeline.log"
     touch "$state/pipeline.done"
   fi
   if [ ! -f "$state/beta.txt" ]; then
@@ -346,7 +373,7 @@ back_to_main() {
 # One study.sh at a time on a machine. infra/vm.sh tests this lock before it
 # starts another, and before it pulls.
 case "${1:-}" in
-  pilot|main|gc|extra-mem|extra-mem-k|extra-weeks|extra-sat)
+  pilot|main|gc|extra-mem|extra-mem-k|extra-rate|extra-weeks|extra-sat)
     mkdir -p "$REPO_ROOT/results"
     exec 9> "$REPO_ROOT/results/.study.lock"
     flock -n 9 || fail "another study.sh is running on this machine." ;;
@@ -386,6 +413,25 @@ case "${1:-}" in
     extra_table "extras/week1" "d01-d07" "data(vm): routing table trained on days 1-7" TRAFFIC_BATCH=d01-d07
     campaign "$RESULTS/replicates-k$STUDY_K-d01-d07" "$EXTRA_N" "$EXTRA_SEED" TRAFFIC_BATCH=d01-d07
     campaign "$RESULTS/replicates-k$STUDY_K-d08-d14" "$EXTRA_N" "$EXTRA_SEED" TRAFFIC_BATCH=d08-d14
+    back_to_main ;;
+
+  extra-rate)
+    # Decided by the user 2026-11-18 (with the panel: the extras need a higher
+    # load): the main study's requests (k = 2.0's holds), more of them per
+    # second, 1,500 req/s peak in 2 GB and 2,000 in 4 GB. The table is retrained
+    # on a profile at half the rate with k = 1.0's holds, the main study's own
+    # relation (1,000 req/s studied, 500 profiled), so it is sized for the
+    # demand it serves; beta at the run's load.
+    limit="${2:-}" rate="${3:-}"
+    case "$limit:$rate" in 2048m:1500|4096m:2000) ;; *) fail "usage: study.sh extra-rate 2048m 1500 | 4096m 2000" ;; esac
+    PROFILE_RPS=$((rate / 2)) PROFILE_CAPACITY=$((150000 * rate / 1000))
+    preflight any "$(building "extras/mem-$limit-r$rate" "mem$limit-r$rate")"
+    command -v zig >/dev/null 2>&1 || fail "zig is not installed (the table is recompiled here)"
+    echo "  load: peak $rate req/s with k = $STUDY_K's holds; profiled at $PROFILE_RPS req/s (profiler slots $PROFILE_CAPACITY)"
+    extra_table "extras/mem-$limit-r$rate" "mem$limit-r$rate" \
+      "data(vm): routing table for a $limit container at a $rate req/s peak (profiled at $PROFILE_RPS)" \
+      MEM_LIMIT="$limit" PEAK_RPS="$rate"
+    campaign "$RESULTS/replicates-k$STUDY_K-r$rate-mem$limit" "$EXTRA_N" "$EXTRA_SEED" MEM_LIMIT="$limit" PEAK_RPS="$rate"
     back_to_main ;;
 
   extra-mem-k)
@@ -430,5 +476,5 @@ case "${1:-}" in
       printf '  %-34s %4s of %-4s runs%s\n' "$(basename "$dir")" "$done_runs" "$planned" "$([ -f "$dir/stats/report.txt" ] && echo ', statistics written')"
     done ;;
 
-  *) sed -n '3,23p' "$0"; exit 2 ;;
+  *) sed -n '3,26p' "$0"; exit 2 ;;
 esac

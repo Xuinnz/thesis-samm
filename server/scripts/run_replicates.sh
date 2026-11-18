@@ -86,6 +86,13 @@ case "$K" in
   3.0) MAX_RPS=1500; PROCESS_HOLD_MS=200; HOLD_SCALE=1.333 ;;
   *) echo "ERROR: K must be one of 1.0 1.5 2.0 2.5 3.0 (got '$K')"; exit 1 ;;
 esac
+# PEAK_RPS: the panel's higher-load extras (decided 2026-11-18). The holds stay
+# K's and only the peak rate changes, so live memory grows with the rate. Unset
+# (every other run), the load is exactly the table above.
+if [ -n "${PEAK_RPS:-}" ]; then
+  [[ "$PEAK_RPS" =~ ^[0-9]+$ ]] || { echo "ERROR: PEAK_RPS must be a whole number of requests per second (got '$PEAK_RPS')"; exit 1; }
+  MAX_RPS="$PEAK_RPS"
+fi
 
 export SIMULATION_MINUTES="${SIMULATION_MINUTES:-10}"
 export MIN_RPS=5 PRE_ALLOCATED_VUS=400 MAX_VUS=1400
@@ -144,6 +151,7 @@ SAMM_EXTRA=()
 # A non-default limit or traffic batch gets a folder of its own, so its results
 # are never mixed with (or skipped as "already done" by) the main configuration.
 VARIANT=""
+[ -n "${PEAK_RPS:-}" ] && VARIANT="$VARIANT-r$PEAK_RPS"
 [ "$MEM_LIMIT" != "1024m" ] && VARIANT="$VARIANT-mem$MEM_LIMIT"
 [ -n "${TRAFFIC_BATCH:-}" ] && VARIANT="$VARIANT-$TRAFFIC_BATCH"
 export RESULTS_DIR="${RESULTS_DIR:-$REPO_ROOT/benchmark-results/replicates-k$K$VARIANT}"

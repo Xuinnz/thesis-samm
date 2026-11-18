@@ -20,8 +20,9 @@ the user; do not improvise a rule.
 | 2 | GC pass | `infra/vm.sh study gc` | 1.5 h |
 | 3 | 2 GB extra | `infra/vm.sh study extra-mem 2048m` | 8 h |
 | 4 | 2 GB at a saturating load (added 2026-11-17, runbook Phase 10c) | `infra/vm.sh study extra-sat 2048m` | 9 h |
-| 5 | 4 GB at k = 3.0 (replaced the 4 GB run at k = 2.0, user 2026-11-18; runbook Phase 10d) | `infra/vm.sh study extra-mem-k 4096m 3.0` | 9 h |
-| 6 | Two-weeks extra | `infra/vm.sh study extra-weeks` | 15 h |
+| 5 | Two-weeks extra (launched 2026-11-18 14:20 UTC) | `infra/vm.sh study extra-weeks` | 15 h |
+| 6 | 2 GB at 1,500 req/s, k = 2.0's holds (runbook Phase 10e) | `infra/vm.sh study extra-rate 2048m 1500` | 9 h |
+| 6b | 4 GB at 2,000 req/s, k = 2.0's holds | `infra/vm.sh study extra-rate 4096m 2000` | 9 h |
 | 7 | Write Chapter 4 from the generated tables and figures | | |
 
 Around each step:
@@ -191,6 +192,8 @@ finishes. n = 15: the same tests, with much less power.
 | `the beta pass ... did not survive` | SAMM died in a 2 GB or 4 GB container at this load. Unexpected | Stop. Report to the user with the pass's result file. Do not lower β by hand |
 | `the confirming run gives beta = X, below the Y applied` | The pool sized by pass 1 is too large once it is in use | Stop. The method iterates once. Applying X is a second iteration and a stated deviation: the user decides |
 | β printed above 1 and applied as 1.0 | The pool cannot exceed what the container allows. Expected at 2 GB and 4 GB (the rehearsal gave 1.03) | State it in the write-up |
+| `extra-rate`: `the profiling run dropped X % of its requests` | The profiler could not keep up at half the run's rate; the trace would be distorted | Stop and ask the user. Do not lower the rate or train on it anyway |
+| `extra-rate`: runs at k6's 1,400-user cap (dropped iterations large in both conditions) | One core cannot serve 2,000 req/s; expected, stated in advance | Report it; memory and latency are partly set by the cap |
 | `extra-sat`: `the $limit table is not committed yet` | `extra-mem 2048m` has not finished | Run it first |
 | `extra-sat`: `the host probe before the calibration failed` | The host is slow; the capacities, and so the k, would be understated | Wait a few hours and run the same command again |
 | `extra-sat`: `SAMM never reached 98 % CPU in the sweep` | Its capacity is only a lower bound, below 1,250 req/s: the k cannot be decided | Stop and ask the user (a wider sweep is their call) |

@@ -879,7 +879,7 @@ writes, 0.87x; finished 11:41 UTC, exit 0).** Copied to
 - *With the 10 flagged runs included* (diagnosis only): memory −14.3 %, p99
   −77.7 %, throughput +31.4 %, every p < .003. No decision changes.
 
-**(d) 4 GB at k = 3.0** (about 9 h; decided by the user 2026-11-18, before any
+**(d) 4 GB at k = 3.0** (NOT RUN: superseded the same day by (e); about 9 h; decided by the user 2026-11-18, before any
 4 GB result). It replaces (a)'s 4 GB run at the main study's load: at 2 GB and
 k = 2.0 memory already did not bind (no kills, peaks near 1 GiB of 2, β capped
 at 1.0), so 4 GB at k = 2.0 would only repeat that. The 4 GB slot is used
@@ -897,6 +897,50 @@ replicates into `replicates-k3.0-mem4096m`. A first launch of (a)'s 4 GB run
 (2026-11-18 13:38 UTC) was stopped by the user's decision while it was still
 retraining; nothing was measured (set aside on the VM as
 `extras-state/STOPPED-mem4096m-k2.0-20261118`).
+
+**(e) Higher load in the bigger containers: the main study's requests, more of
+them** (decided by the user 2026-11-18, with the panel's request for a higher
+load, before any of these runs). The k scheme (rate up, holds down by the same
+factor) keeps live memory constant; it exists for 1 GiB, where memory runs out
+before CPU. In 2 GB and 4 GB that constraint is gone, so the extras keep k =
+2.0's holds (300 ms process hold, the rest x2) and raise only the peak rate.
+Live memory then grows with the rate, as it does when real traffic grows.
+
+| | Peak rate | Holds | Live-memory demand against the main study |
+| :--- | ---: | :--- | ---: |
+| Main study, 1 GiB | 1,000 req/s | k = 2.0 | 1x |
+| (a) 2 GB, kept as a main result | 1,000 req/s | k = 2.0 | 1x |
+| **2 GB** | **1,500 req/s** | k = 2.0 | 1.5x |
+| **4 GB** | **2,000 req/s** | k = 2.0 | 2x |
+
+```bash
+infra/vm.sh study extra-rate 2048m 1500
+infra/vm.sh study extra-rate 4096m 2000
+```
+
+- *The table is retrained for each*, on a profile at half the run's peak rate
+  with k = 1.0's holds (750 and 1,000 req/s): the main study's own relation
+  (1,000 studied, 500 profiled), so the profile's live memory and lifetimes
+  stand to the run as they do in the main study. The profiler's slots scale
+  with the rate (225,000 and 300,000). If k6 dropped more than 1 % of the
+  profiling run's requests, the script refuses: a profiled server that fell
+  behind is not the workload.
+- *β* at the run's own load (two passes), then 15 replicates, same seeds as
+  the other extras, into `replicates-k2.0-r<rate>-mem<limit>`.
+- *A switch in the measured system:* `run_replicates.sh` reads `PEAK_RPS`
+  (unset everywhere else; then every load is exactly the k table). Added after
+  the two-weeks extra was launched, so every originally planned campaign ran
+  on the main study's exact measured system; these two record a different
+  `measured_system_sha256`, which is stated. **If the two-weeks extra has to
+  be resumed, resume it before `infra/vm.sh update`,** or its campaign lock
+  will (rightly) refuse the changed file.
+- *Expected limits, stated before the data:* the server has one core
+  (capacities about 807 and 1,136 req/s at 2 GB), so 2,000 req/s is far above
+  both. Runs may reach k6's 1,400-user cap; beyond it k6 drops requests, and
+  memory and latency are then partly set by the cap. Reported as such.
+- *What this replaces:* (c)'s 2 GB run at k = 2.5 used shorter holds; it is
+  kept and reported as a supplementary result, superseded for the higher-load
+  question by the 2 GB run here. (d)'s 4 GB at k = 3.0 was never run.
 
 ## Phase 11: statistics and reporting
 
