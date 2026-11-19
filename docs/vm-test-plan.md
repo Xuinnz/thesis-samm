@@ -808,6 +808,27 @@ quietest state still runs at 75 % of its busiest, and the load generator maps
 each batch's busiest state to `MAX_RPS`, so a batch's absolute level never
 reaches the server. Surge against off-peak is what the load levels (k) show.
 
+**(b) Result (finished 2026-11-19 05:26 UTC, exit 0).** Copied to
+`vm-results/replicates-k2.0-d01-d07/`, `replicates-k2.0-d08-d14/` and the two
+β passes. Table on days 1-7: β pass 1 gave 0.847, pass 2 at 0.847 gave 0.917,
+so 0.847 stands (`482efff` on `extras/week1`). Integrity ok in both, every
+probe passed, steal 0 %, no run timing-suspect.
+
+| | Days 1-7 (trained on) | Days 8-14 (not seen) |
+| :--- | :--- | :--- |
+| Runs killed, jemalloc / SAMM | 4 / 0 (r01 r05 r08 r11) | 5 / 0 (r01 r05 r08 r11 r12) |
+| Survival, Fisher (supplementary) | p = 0.100 | p = 0.042 |
+| Peak memory | +6.1 % (t-test p = 0.045, not rejected) | +8.5 % (p < .001, rejected, against SAMM) |
+| Processing p99 | −83.9 % (p < .001) | −83.3 % (p < .001) |
+| Throughput | +4.5 % (p = 0.146, not detected) | +4.3 % (p = 0.071, not detected) |
+| CPU, % of the core | 70.4 against 57.5 | 70.8 against 58.0 |
+| Page faults per request | 85.1 against 3.7 | 86.3 against 3.9 |
+
+More than 10 % of jemalloc's runs were killed in both weeks, so survival is
+the principal result in each. Week 2 is not worse for SAMM than week 1: the
+table trained on one week carried over to the next (a mild drift test, as
+stated above).
+
 **(c) 2 GB at a load that saturates both** (about 9 h; added 2026-11-17, before
 any 2 GB result existed). The 1 GiB study could not apply Phase 5's rule (the
 lowest k whose peak covers both capacities): at k = 2.5 the baseline died in
@@ -960,6 +981,12 @@ infra/vm.sh study extra-rate 4096m 2000
   faster), so the three machines are close. Provisioning overwrote the tracked
   `infra-environment.txt` (samm-bench's record); each VM's record was moved to
   `results/infra-environment-<host>.txt` and the file restored before launch.
+- **Both stopped at the profile check (2026-11-19 02:32 UTC, exit 1), before
+  any table or run:** the profiling run dropped 1.62 % of its requests at
+  750 req/s (2 GB) and 7.84 % at 1,000 req/s (4 GB), over the 1 % limit. The
+  profiler cannot keep up above about the 500 req/s it was built for. The VMs
+  were left on their `extras/mem-<limit>-r<rate>` branches with the
+  uncommitted pipeline outputs. How to profile instead is the user's decision.
 - *What this replaces:* (c)'s 2 GB run at k = 2.5 used shorter holds; it is
   kept and reported as a supplementary result, superseded for the higher-load
   question by the 2 GB run here. (d)'s 4 GB at k = 3.0 was never run.
