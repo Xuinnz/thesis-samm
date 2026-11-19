@@ -12,6 +12,9 @@
 #   infra/vm.sh study CMD  start server/scripts/study.sh CMD on the VM, detached; the VM
 #                          powers off when it ends (CMD: pilot, main, gc, extra-mem 2048m,
 #                          extra-mem 4096m, extra-weeks, extra-sat 2048m). Prints the first lines of its log.
+#                          A VM other than samm-bench keeps its own host-probe limit in an
+#                          untracked infra/study.local.env (sources study.env, then
+#                          overrides K6_STARTUP_LIMIT_S from that VM's own reference).
 #   infra/vm.sh wait       block until the VM is off (at most WAIT_MINUTES, default 25)
 #   infra/vm.sh delete     delete the VM AND ITS DISK (asks first)
 #
@@ -78,6 +81,7 @@ case "${1:-}" in
       if ! flock -n results/.study.lock true || pgrep -f '[r]un_replicates.sh|[i]nternal-validation/run.sh' >/dev/null; then
         echo 'REFUSED: a run is already in progress on the VM.'; exit 1; fi
       sudo shutdown -h +$deadman >/dev/null 2>&1
+      if [ -f infra/study.local.env ]; then export STUDY_ENV_FILE=\$PWD/infra/study.local.env; echo \"settings: infra/study.env plus this VM's infra/study.local.env\"; fi
       (setsid nohup infra/then-poweroff.sh $log server/scripts/study.sh $* > /dev/null 2>&1 < /dev/null &)
       sleep 25; echo \"log: ~/samm-final/$log\"; tail -n 30 $log"
     ;;
