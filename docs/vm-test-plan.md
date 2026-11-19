@@ -938,6 +938,28 @@ infra/vm.sh study extra-rate 4096m 2000
   (capacities about 807 and 1,136 req/s at 2 GB), so 2,000 req/s is far above
   both. Runs may reach k6's 1,400-user cap; beyond it k6 drops requests, and
   memory and latency are then partly set by the cap. Reported as such.
+- *Run on two more VMs, in parallel with the two-weeks extra* (user,
+  2026-11-19): `samm-rate2g` (2 GB) and `samm-rate4g` (4 GB), t2d-standard-4 in
+  asia-southeast1-b, provisioned with `infra/provision.sh` from GitHub at
+  a7d1e7a. Same CPU (AMD EPYC 7B13), kernel 7.0.0-1017-gcp, cgroup v2, no swap,
+  THP madvise, Node 22.23.5 (host and images), k6 0.55.0, Zig 0.15.2; Docker
+  29.10.0 (samm-bench 29.9.3). Each recorded its own pooled reference first
+  (`infra/record-reference.sh`, six runs, as samm-bench's), its k6 limit in an
+  untracked `infra/study.local.env`:
+
+  | Reference (median of six) | samm-bench (11-13) | samm-rate2g | samm-rate4g |
+  | :--- | ---: | ---: | ---: |
+  | k6 start-up | 125.4 s | 121.4 s | 124.7 s |
+  | V8 microbench, no touch | 7,289.7 ns | 6,728.1 (0.92x) | 6,783.4 (0.93x) |
+  | V8 microbench, page writes | 12,323.2 ns | 11,273.8 (0.91x) | 11,256.9 (0.91x) |
+  | GC per collection | 1.79 ms | 1.6 (0.91x) | 1.6 (0.92x) |
+  | k6 limit | 138 s | 134 s | 137 s |
+
+  The new VMs are about 8 % faster than samm-bench's 11-13 reference; samm-bench
+  itself probed at 0.87-0.97x of that reference on 11-17/18 (a ratio under 1 is
+  faster), so the three machines are close. Provisioning overwrote the tracked
+  `infra-environment.txt` (samm-bench's record); each VM's record was moved to
+  `results/infra-environment-<host>.txt` and the file restored before launch.
 - *What this replaces:* (c)'s 2 GB run at k = 2.5 used shorter holds; it is
   kept and reported as a supplementary result, superseded for the higher-load
   question by the 2 GB run here. (d)'s 4 GB at k = 3.0 was never run.
