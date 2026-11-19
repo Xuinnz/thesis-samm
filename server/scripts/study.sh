@@ -13,7 +13,7 @@
 #   study.sh extra-mem 4096m      the same for 4 GB
 #   study.sh extra-weeks          Phase 10b: train on days 1-7, test on days 1-7 and 8-14 (about 14 h)
 #   study.sh extra-rate 2048m 1500  Phase 10e: k = 2.0's holds at a 1,500 req/s peak in 2 GB:
-#                                 retrain (profiled at half the rate), beta, 15 replicates (about 9 h)
+#                                 retrain (profiled at 500 req/s), beta + fallback check, 15 replicates (about 9 h)
 #   study.sh extra-rate 4096m 2000  the same at a 2,000 req/s peak in 4 GB
 #   study.sh extra-mem-k 4096m 3.0  Phase 10d (not used: superseded by extra-rate, 2026-11-18)
 #   study.sh extra-sat 2048m      Phase 10c: the 2 GB table at a load that saturates both (about 9 h;
@@ -50,7 +50,7 @@ export CPUSET_CPUS K6_TASKSET PROBE_CPU PROBE_REFERENCE K6_STARTUP_LIMIT_S PROBE
 # Left over in a shell, any of these would quietly change what is measured.
 unset MEM_LIMIT TRAFFIC_BATCH SAMM_TELEMETRY SAMM_SEGMENT_REUSE SAMM_BETA_UTILIZATION SAMM_CONTAINER_BYTES \
       ROTATE VARY_SEED CONDITIONS SCHEDULE_SEED RESULTS_DIR K N DRY_RUN SUMMARY_ONLY CAMPAIGN_ALLOW_CHANGE \
-      POLL_SAMM_STATS SAMM_ALLOW_CONTAINER_MISMATCH EXTRA_K PEAK_RPS PROFILE_RPS PROFILE_CAPACITY 2>/dev/null || true
+      POLL_SAMM_STATS SAMM_ALLOW_CONTAINER_MISMATCH EXTRA_K PEAK_RPS PROFILE_RPS PROFILE_CAPACITY CHECK_FALLBACKS 2>/dev/null || true
 # EXTRA_K: the load point of an extra that runs at its own k (extra-sat, extra-mem-k;
 # set by that command, never from the environment). Everything else: STUDY_K.
 # STUDY_MINUTES shortens every run. It exists for rehearsing this script on a
@@ -175,6 +175,34 @@ if share > 1.0:
 PY
 }
 
+# fallback_check <beta-pass dir>: extra-rate's tables are profiled at 500 req/s
+# (the profiler cannot keep up above it), so their floors are sized for the
+# main study's demand, not the run's. The shared pool should absorb the rest;
+# this checks that it did. If more than 1 % of SAMM's managed allocations fell
+# back to malloc for lack of room (limit decided 2026-11-19, before any of
+# these runs; the 1 GiB beta passes ran at 0.11-0.25 %, 2 GB at 0), the table is too small
+# for the load and the script stops.
+fallback_check() {
+  "$PY" - "$1/r01-samm-samm-stats.jsonl" <<'PY' || exit 1
+import json, sys
+last = None
+for line in open(sys.argv[1]):
+    line = line.strip()
+    if line.startswith('{'):
+        last = json.loads(line).get('stats') or last
+if not last:
+    sys.exit(f"REFUSED: no SAMM counters in {sys.argv[1]}; the fallbacks cannot be checked.")
+fell = sum(int(last.get(k) or 0) for k in ('capacityFallbacks', 'slabExhaustedFallbacks'))   # budgetRefusals = capacityFallbacks (the same events)
+served = int(last.get('regionReclaimed') or 0) + int(last.get('unscopedAllocations') or 0)
+share = 100 * fell / max(1, served + fell)
+print(f"  fallbacks for lack of room: {fell:,} of {served + fell:,} managed allocations ({share:.3f} %)"
+      f" [capacity {last.get('capacityFallbacks', 0):,}, slab exhausted {last.get('slabExhaustedFallbacks', 0):,}]")
+if share > 1.0:
+    sys.exit(f"REFUSED: {share:.2f} % of managed allocations fell back to malloc (over 1 %): the table, profiled at "
+             "500 req/s, is too small for this load. Ask the user.")
+PY
+}
+
 # extra_table <branch> <label> <commit message> [NAME=value ...]
 # On its own branch: profile and retrain under the variant's settings, derive
 # beta as in Phase 6 (measure, recompile, confirm), commit the table there.
@@ -210,6 +238,7 @@ extra_table() {
   if [ ! -f "$state/beta.txt" ]; then
     say "$label: beta pass 1"
     json=$(beta_pass "$RESULTS/beta-$label-pass1" "$@")
+    [ -n "${CHECK_FALLBACKS:-}" ] && fallback_check "$RESULTS/beta-$label-pass1"
     beta=$("$PY" -c "import json,sys; b=json.loads(sys.argv[1])['beta_to_apply']; print('' if b is None else b)" "$json")
     [ -n "$beta" ] || fail "pass 1 gives a beta of zero or less: the pool cannot be sized from this run."
     say "$label: recompile with beta = $beta"
@@ -220,6 +249,7 @@ extra_table() {
   beta=$(cat "$state/beta.txt")
   say "$label: beta pass 2 (confirm beta = $beta)"
   json=$(beta_pass "$RESULTS/beta-$label-pass2" "$@")
+  [ -n "${CHECK_FALLBACKS:-}" ] && fallback_check "$RESULTS/beta-$label-pass2"
   beta2=$("$PY" -c "import json,sys; print(json.loads(sys.argv[1])['beta'])" "$json")
   "$PY" -c "import sys; sys.exit(0 if float(sys.argv[1]) >= float(sys.argv[2]) else 1)" "$beta2" "$beta" \
     || fail "the confirming run gives beta = $beta2, below the $beta applied: the pool is too large for this variant. The method iterates once; decide by hand (runbook Phase 6) before any run of $label."
@@ -419,17 +449,19 @@ case "${1:-}" in
     # Decided by the user 2026-11-18 (with the panel: the extras need a higher
     # load): the main study's requests (k = 2.0's holds), more of them per
     # second, 1,500 req/s peak in 2 GB and 2,000 in 4 GB. The table is retrained
-    # on a profile at half the rate with k = 1.0's holds, the main study's own
-    # relation (1,000 req/s studied, 500 profiled), so it is sized for the
-    # demand it serves; beta at the run's load.
+    # in that container at the standard 500 req/s profile, as every other table
+    # (2026-11-19: profiling at half the rate, 750 and 1,000 req/s, was refused
+    # by profile_check, the profiler cannot keep up); beta at the run's load
+    # sizes the pool, and fallback_check stops it if the 500 req/s floors leave
+    # too little room. PROFILE_RPS stays unset.
     limit="${2:-}" rate="${3:-}"
     case "$limit:$rate" in 2048m:1500|4096m:2000) ;; *) fail "usage: study.sh extra-rate 2048m 1500 | 4096m 2000" ;; esac
-    PROFILE_RPS=$((rate / 2)) PROFILE_CAPACITY=$((150000 * rate / 1000))
+    CHECK_FALLBACKS=1
     preflight any "$(building "extras/mem-$limit-r$rate" "mem$limit-r$rate")"
     command -v zig >/dev/null 2>&1 || fail "zig is not installed (the table is recompiled here)"
-    echo "  load: peak $rate req/s with k = $STUDY_K's holds; profiled at $PROFILE_RPS req/s (profiler slots $PROFILE_CAPACITY)"
+    echo "  load: peak $rate req/s with k = $STUDY_K's holds; table profiled at the standard 500 req/s"
     extra_table "extras/mem-$limit-r$rate" "mem$limit-r$rate" \
-      "data(vm): routing table for a $limit container at a $rate req/s peak (profiled at $PROFILE_RPS)" \
+      "data(vm): routing table for a $limit container, for a $rate req/s peak (profiled at 500)" \
       MEM_LIMIT="$limit" PEAK_RPS="$rate"
     campaign "$RESULTS/replicates-k$STUDY_K-r$rate-mem$limit" "$EXTRA_N" "$EXTRA_SEED" MEM_LIMIT="$limit" PEAK_RPS="$rate"
     back_to_main ;;

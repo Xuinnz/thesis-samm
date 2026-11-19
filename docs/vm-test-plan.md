@@ -987,6 +987,17 @@ infra/vm.sh study extra-rate 4096m 2000
   profiler cannot keep up above about the 500 req/s it was built for. The VMs
   were left on their `extras/mem-<limit>-r<rate>` branches with the
   uncommitted pipeline outputs. How to profile instead is the user's decision.
+- **Decided by the user 2026-11-19 (before any table or run):** profile at the
+  standard 500 req/s with k = 1.0's holds, as every other table. β at the
+  run's load still sizes the whole pool; the shares between call sites barely
+  move with the rate; the guaranteed floors (the 90th percentile of each site's
+  concurrent bytes, in absolute bytes) are sized for the main study's demand,
+  so above them the arenas borrow from the shared pool (1,300 MiB at 2 GB). A
+  check stops the run if that is not enough: more than 1 % of SAMM's managed
+  allocations falling back to malloc for lack of room in either β pass
+  (capacity plus slab-exhausted fallbacks; the 1 GiB passes ran at
+  0.11-0.25 %, 2 GB at 0). Limitation to state: these tables' floors come from
+  a 500 req/s profile.
 - *What this replaces:* (c)'s 2 GB run at k = 2.5 used shorter holds; it is
   kept and reported as a supplementary result, superseded for the higher-load
   question by the 2 GB run here. (d)'s 4 GB at k = 3.0 was never run.

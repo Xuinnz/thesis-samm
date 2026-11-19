@@ -192,6 +192,7 @@ finishes. n = 15: the same tests, with much less power.
 | `the beta pass ... did not survive` | SAMM died in a 2 GB or 4 GB container at this load. Unexpected | Stop. Report to the user with the pass's result file. Do not lower β by hand |
 | `the confirming run gives beta = X, below the Y applied` | The pool sized by pass 1 is too large once it is in use | Stop. The method iterates once. Applying X is a second iteration and a stated deviation: the user decides |
 | β printed above 1 and applied as 1.0 | The pool cannot exceed what the container allows. Expected at 2 GB and 4 GB (the rehearsal gave 1.03) | State it in the write-up |
+| `extra-rate`: `X % of managed allocations fell back to malloc (over 1 %)` | The 500 req/s table's floors leave too little room at this load | Stop and ask the user. Do not raise floors by hand or loosen the limit |
 | `extra-rate`: `the profiling run dropped X % of its requests` | The profiler could not keep up at half the run's rate; the trace would be distorted | Stop and ask the user. Do not lower the rate or train on it anyway |
 | `extra-rate`: runs at k6's 1,400-user cap (dropped iterations large in both conditions) | One core cannot serve 2,000 req/s; expected, stated in advance | Report it; memory and latency are partly set by the cap |
 | `extra-sat`: `the $limit table is not committed yet` | `extra-mem 2048m` has not finished | Run it first |
