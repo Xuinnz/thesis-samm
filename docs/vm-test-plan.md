@@ -998,6 +998,33 @@ infra/vm.sh study extra-rate 4096m 2000
   (capacity plus slab-exhausted fallbacks; the 1 GiB passes ran at
   0.11-0.25 %, 2 GB at 0). Limitation to state: these tables' floors come from
   a 500 req/s profile.
+- **Results (relaunched 2026-11-19 12:42 UTC with the 500 req/s profile; both
+  finished about 21:07 UTC, exit 0).** Copied to
+  `vm-results/replicates-k2.0-r1500-mem2048m/`, `replicates-k2.0-r2000-mem4096m/`
+  and their β passes. Integrity ok, every probe passed, steal 0 %, no run
+  killed or timing-suspect in either.
+
+  | | 2 GB, 1,500 req/s | 4 GB, 2,000 req/s |
+  | :--- | :--- | :--- |
+  | Table | β 1.003 → 1.0, confirmed 1.009 (`f13e50a`) | β 0.993 → 0.992, confirmed 0.995 (`8571b2b`) |
+  | Fallbacks for lack of room (β passes) | 0.001 % and 0 % | 0 % and 0 % |
+  | Offered, mean | 1,196 / 1,194 req/s | 1,589 / 1,591 req/s |
+  | Throughput, jemalloc → SAMM | 831.5 → 1,095.2 (+31.7 %, t-test p < .001) | 918.5 → 1,310.6 (+42.7 %, t-test p < .001) |
+  | Processing p99 | 1,273.4 → 375.2 ms (−70.5 %, p < .001) | 914.5 → 420.0 ms (−54.1 %, p < .001) |
+  | Peak memory | 1,531.9 → 1,426.3 MiB (−6.9 %, p = 0.005, in SAMM's favour) | 1,579.1 → 1,705.5 MiB (+8.0 %, p < .001, against SAMM) |
+  | CPU per request | 1.196 → 0.875 ms | 1.079 → 0.683 ms |
+  | Page faults per request | 96.6 → 2.2 | 89.5 → 3.4 |
+  | k6 users at most, mean (range) | jemalloc 980 (971-989), SAMM 739 (536-941) | jemalloc 989 (985-996), SAMM 912 (822-975) |
+
+  Every test rejected at α = 0.0167. Neither container came near its limit
+  (peaks 1.4-1.7 GiB). As stated in advance, the load generator bounds these
+  runs: k6 never held more than about 1,000 users at once (jemalloc topped out
+  at 971-996 in every run; MAX_VUS is 1,400), so beyond that it dropped
+  arrivals, and memory and latency at these rates are partly set by that
+  bound. At 4 GB both allocators sit near it, so memory there reflects SAMM's
+  larger footprint per request in flight, as in (a); at 2 GB jemalloc's queue
+  is larger, as at k = 2.5. CPU per request falls with load for both
+  (descriptive).
 - *What this replaces:* (c)'s 2 GB run at k = 2.5 used shorter holds; it is
   kept and reported as a supplementary result, superseded for the higher-load
   question by the 2 GB run here. (d)'s 4 GB at k = 3.0 was never run.
